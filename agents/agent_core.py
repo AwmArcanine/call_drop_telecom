@@ -1,6 +1,7 @@
 # agents/agent_core.py
 from typing import List, Dict
 import os
+import json
 import torch
 import chromadb
 from sentence_transformers import SentenceTransformer
@@ -16,7 +17,7 @@ CHROMA_DIR = "chroma_db"
 COLLECTION_NAME = "telecom_logs"
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 
-HF_MODEL_NAME = "MBZUAI/LaMini-Flan-T5-248M"
+HF_MODEL_NAME = "google/flan-t5-base"
 
 hf_token = os.getenv("HUGGINGFACE_TOKEN")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -79,21 +80,47 @@ def generate_ai_summary(snippets: List[str], region: str = None) -> str:
 
 # --- AI Recommendations ---
 def generate_ai_recommendations(region: str, metrics: Dict) -> str:
+    """
+    Generate three clear, concise network improvement recommendations
+    using the Flan-T5 model. Keeps the earlier structure but ensures
+    exactly three unique actions.
+    """
     prompt = (
         f"You are a telecom optimization assistant for region {region}.\n"
         f"Metrics:\n"
-        f"- Avg Signal Strength: {metrics.get('avg_signal')} dBm\n"
+        f"- Average Signal Strength: {metrics.get('avg_signal')} dBm\n"
         f"- Congestion Level: {metrics.get('congestion_level')}\n"
         f"- Handoff Failure Rate: {metrics.get('handoff_pct')}%\n"
         f"- Dropout Rate: {metrics.get('drop_rate')}%\n\n"
-        "Suggest exactly **three** network resolutions in this format:\n"
+        "Suggest exactly three *technical and practical* resolutions to reduce call drops.\n"
+        "Base your reasoning on signal, congestion, and handoff failures.\n\n"
+        "Each suggestion should be unique and follow this format:\n"
         "1. (Action) - Priority: (High/Medium/Low) - (Short reason)\n"
         "2. (Action) - Priority: (High/Medium/Low) - (Short reason)\n"
-        "3. (Action) - Priority: (High/Medium/Low) - (Short reason)"
+        "3. (Action) - Priority: (High/Medium/Low) - (Short reason)\n\n"
+        "Example:\n"
+        "1. Optimize antenna tilt and transmission power - Priority: High - To improve weak signal coverage.\n"
+        "2. Deploy microcells during peak load - Priority: High - To reduce congestion and improve throughput.\n"
+        "3. Fine-tune handoff timers - Priority: Medium - To minimize dropouts during mobility.\n\n"
+        "Now generate only the 3 final actionable steps below:\n"
     )
 
-    rec = llm(prompt, max_new_tokens=300, do_sample=False)[0]["generated_text"]
-    return rec.strip()
+    response = llm(prompt, max_new_tokens=250, do_sample=False)[0]["generated_text"]
+
+    # --- Post-process to ensure exactly 3 lines ---
+    lines = [ln.strip() for ln in response.split("\n") if ln.strip()]
+    final_lines = []
+
+    for ln in lines:
+        # keep only lines that start with 1., 2., or 3.
+        if ln[0:2] in ("1.", "2.", "3."):
+            final_lines.append(ln)
+    # if less than 3 lines, fill in placeholders
+    while len(final_lines) < 3:
+        final_lines.append(f"{len(final_lines)+1}. Further network optimization required - Priority: Medium - Default fallback.")
+
+    return "\n".join(final_lines[:3])
+
 
 
 # --- Main Analysis ---
