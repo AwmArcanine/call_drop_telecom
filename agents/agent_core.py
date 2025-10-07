@@ -16,9 +16,7 @@ CHROMA_DIR = "chroma_db"
 COLLECTION_NAME = "telecom_logs"
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 
-# Preferred models (TCS requirement)
-PRIMARY_MODEL = "mistralai/Mistral-7B-Instruct-v0.1"
-FALLBACK_MODEL = "MBZUAI/LaMini-Flan-T5-248M"
+HF_MODEL_NAME = "MBZUAI/LaMini-Flan-T5-248M"
 
 hf_token = os.getenv("HUGGINGFACE_TOKEN")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -32,43 +30,18 @@ embedder = SentenceTransformer(EMBED_MODEL_NAME)
 
 
 # --- Try to load Mistral (preferred), else fallback to LaMini ---
-def load_llm():
-    try:
-        print("🚀 Loading Mistral-7B-Instruct...")
-        tokenizer = AutoTokenizer.from_pretrained(PRIMARY_MODEL, token=hf_token)
-        model = AutoModelForCausalLM.from_pretrained(
-            PRIMARY_MODEL,
-            token=hf_token,
-            torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
-            device_map="auto" if DEVICE == "cuda" else None,
-            use_auth_token=hf_token,
-        )
-        llm = pipeline(
-            "text-generation",
-            model=model,
-            tokenizer=tokenizer,
-            device=0 if DEVICE == "cuda" else -1,
-            max_new_tokens=256,
-            temperature=0.3,
-            repetition_penalty=1.1,
-            top_p=0.9,
-        )
-        print("✅ Mistral model loaded successfully.")
-        return llm, "Mistral-7B-Instruct"
-    except Exception as e:
-        print(f"⚠️ Mistral load failed: {e}\n➡️ Falling back to LaMini-Flan-T5...")
-        tokenizer = AutoTokenizer.from_pretrained(FALLBACK_MODEL)
-        model = AutoModelForSeq2SeqLM.from_pretrained(FALLBACK_MODEL)
-        llm = pipeline(
-            "text2text-generation",
-            model=model,
-            tokenizer=tokenizer,
-            device=0 if DEVICE == "cuda" else -1,
-        )
-        return llm, "LaMini-Flan-T5"
+tokenizer = AutoTokenizer.from_pretrained(HF_MODEL_NAME)
+model = AutoModelForSeq2SeqLM.from_pretrained(HF_MODEL_NAME)
+llm = pipeline(
+    "text2text-generation",
+    model=model,
+    tokenizer=tokenizer,
+    device=0 if DEVICE == "cuda" else -1,
+    max_new_tokens=250,
+    temperature=0.2,
+)
 
-
-llm, active_model = load_llm()
+print("✅ Model loaded successfully: MBZUAI/LaMini-Flan-T5-248M")
 
 
 # --- Tools ---
@@ -157,5 +130,4 @@ def analyze_region_query(user_query: str, region: str = None):
         "summary": summary_txt,
         "recommendations": recs,
         "evidence": hits,
-        "model_used": active_model,
     }
