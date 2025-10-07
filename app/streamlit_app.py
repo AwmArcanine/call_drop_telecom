@@ -1,3 +1,4 @@
+import re
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -99,62 +100,40 @@ if run:
             # --- Agent Response ---
             st.markdown("### 🧠 Agent Response")
 
-            # Extract resolutions cleanly from model output
-            recs = [r.strip() for r in result["recommendations"].split("\n") if r.strip() and r[0].isdigit()]
-            if len(recs) < 3:
-                # if the LLM only gave 1–2, add placeholders
-                 recs.append("Further network optimization required.")
+            # Safely extract recommendations (1., 2., 3.) from model output
+            rec_text = result.get("recommendations", "")
+            rec_lines = re.findall(r"\d+\..+", rec_text)
 
+            # Fallback handling — guarantee at least 3 items
+            if len(rec_lines) < 3:
+                # Try splitting by newline if regex finds fewer
+                alt_lines = [l.strip() for l in rec_text.split("\n") if l.strip()]
+                rec_lines.extend(alt_lines)
+
+            # Final fallback defaults
+            while len(rec_lines) < 3:
+                rec_lines.append("Further network optimization required.")
+
+            # Clean and keep only first 3
+            rec_lines = [r.strip() for r in rec_lines[:3]]
+
+            # Display formatted structured output
             st.markdown(
-            f"""
-            <div class="card">
-                <p><b>Region:</b> {region}</p>
-                <p><b>Observation:</b> (Summarized automatically by the AI model)</p>
-                <p><b>Root Cause:</b> {result['summary']}</p>
-                <p><b>Suggested Resolution:</b></p>
-                <ol>
-                    <li>{recs[0]}</li>
-                    <li>{recs[1]}</li>
-                    <li>{recs[2]}</li>
-                </ol>
-            </div>
-            """,
-            unsafe_allow_html=True,
-             )
-
-            # --- Evidence Section ---
-            st.markdown("### 📂 Evidence (Top Retrieved Logs)")
-            region_hits = [
-                h for h in result["evidence"]
-                if h["metadata"].get("Region", "").lower() == region.lower()
-            ]
-
-            if not region_hits:
-                st.warning(f"No relevant logs found for region: **{region}**.")
-            else:
-                for i, hit in enumerate(region_hits, 1):
-                    meta = hit["metadata"]
-                    signal_color = get_signal_color(meta.get("Signal_Str_dBm"))
-                    congestion_color = get_congestion_color(meta.get("Congestion_Level"))
-
-                    # Dropout rate calculation (per 1000 calls assumption)
-                    call_drops = float(meta.get("Call_Drops", 0))
-                    dropout_rate = round((call_drops / 1000) * 100, 2)
-
-                    st.markdown(
-                        f"""
-                        <div class="card">
-                            <b>Hit {i}:</b> {meta.get("Region")} | Tower: {meta.get("Tower_ID")} | Date: {meta.get("Date")}<br><br>
-                            <span class="metric">📶 Signal:</span> {meta.get("Signal_Str_dBm")} dBm ({signal_color})<br>
-                            <span class="metric">🚦 Congestion:</span> {meta.get("Congestion_Level")} ({congestion_color})<br>
-                            <span class="metric">🔄 Handoff Failure:</span> {meta.get("Handoff_Failure_pct")}%<br>
-                            <span class="metric">📉 Dropout Rate:</span> {dropout_rate}%<br>
-                            <span class="metric">📝 Notes:</span> {meta.get("Notes")}<br>
-                            <b>📊 Distance:</b> {hit.get("distance"):.4f}
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                f"""
+                <div class="card">
+                    <p><b>Region:</b> {region}</p>
+                    <p><b>Observation:</b> (Summarized automatically by the AI model)</p>
+                    <p><b>Root Cause:</b> {result['summary']}</p>
+                    <p><b>Suggested Resolution:</b></p>
+                    <ol>
+                        <li>{rec_lines[0]}</li>
+                        <li>{rec_lines[1]}</li>
+                        <li>{rec_lines[2]}</li>
+                    </ol>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
         except Exception as e:
             st.error(f"⚠️ Error: {e}")
