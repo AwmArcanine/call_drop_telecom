@@ -43,24 +43,32 @@ if run:
     # ---- Agent Response ----
     st.markdown("### 🧠 Agent Response")
 
-    # Safely parse recommendations (guarantee 3)
-    rec_text = result.get("recommendations", "")
-    rec_lines = re.findall(r"\d+\..+", rec_text)
-    if len(rec_lines) < 3:
-        alt_lines = [l.strip() for l in rec_text.split("\n") if l.strip()]
-        rec_lines.extend(alt_lines)
-    while len(rec_lines) < 3:
-        rec_lines.append("Further network optimization required.")
-    rec_lines = [r.strip() for r in rec_lines[:3]]
+    # --- Extract Recommendations Cleanly ---
+    rec_text = result.get("recommendations", "").strip()
+    # Extract lines like "1. ..." "2. ..." "3. ..." robustly
+    rec_lines = re.findall(r"(?:\d+[\.\)]\s*)([^\n]+)", rec_text)
+    rec_lines = [r.strip() for r in rec_lines if r.strip()]
 
-    # Extract Observation and Root Cause
+    # Ensure exactly 3 distinct actionable lines
+    defaults = [
+        "Deploy additional microcells or optimize antenna alignment to improve coverage.",
+        "Tune handoff thresholds and reconfiguration timers to minimize drop events.",
+        "Increase backhaul capacity and conduct targeted drive tests in problem areas."
+    ]
+    if not rec_lines:
+        rec_lines = defaults
+    elif len(rec_lines) < 3:
+        rec_lines.extend(defaults[len(rec_lines):])
+    rec_lines = rec_lines[:3]
+
+    # --- Observation & Root Cause ---
     summary_text = result.get("summary", "")
     observation_match = re.search(r"Observation[:\-]\s*(.+)", summary_text, re.IGNORECASE)
     observation = observation_match.group(1).strip() if observation_match else \
-        "Recent network monitoring shows a rise in call drops, likely linked to load and signal degradation."
+        "Increased call drops observed due to high user load and moderate congestion levels."
     root_cause = summary_text or "No specific cause identified."
 
-    # Display formatted agent findings
+    # --- Agent Output Block ---
     st.markdown(
         f"""
         <div style="padding:20px; border-radius:10px; background-color:#f9fafc; border:1px solid #ddd;">
@@ -78,18 +86,9 @@ if run:
         unsafe_allow_html=True,
     )
 
-    # ---- Recommended Actions Section ----
-    st.markdown("### 🧩 Recommended Actions")
-    st.write(
-        "These steps are prioritized based on signal strength, congestion, and handoff performance."
-    )
-    for i, rec in enumerate(rec_lines, 1):
-        st.markdown(f"**{i}.** {rec}")
-
     # ---- Evidence Section ----
     st.markdown("### 📜 Evidence (Top Retrieved Logs)")
 
-    # Filter region-specific logs
     hits = [h for h in result["evidence"] if h["metadata"].get("Region", "").lower() == region.lower()]
 
     if not hits:
@@ -102,7 +101,7 @@ if run:
             handoff = meta.get("Handoff_Failure_pct", "N/A")
             drops = meta.get("Call_Drops", "N/A")
 
-            # Compute dropout rate (example)
+            # Dropout rate (approximate)
             try:
                 dropout_rate = f"{(int(drops)/100):.1f}%"
             except Exception:
