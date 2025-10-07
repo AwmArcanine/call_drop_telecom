@@ -98,6 +98,13 @@ if run:
 
             # --- Agent Response ---
             st.markdown("### 🧠 Agent Response")
+
+            # Extract resolutions cleanly from model output
+            recs = [r.strip() for r in result["recommendations"].split("\n") if r.strip() and r[0].isdigit()]
+            if len(recs) < 3:
+                # if the LLM only gave 1–2, add placeholders
+                recs += ["Further analysis required.", "Run additional network diagnostics."]
+
             st.markdown(
                 f"""
                 <div class="card">
@@ -106,9 +113,9 @@ if run:
                     <p><b>Root Cause:</b> {result['summary']}</p>
                     <p><b>Suggested Resolution:</b></p>
                     <ol>
-                        <li>{result['recommendations'].splitlines()[0]}</li>
-                        <li>{result['recommendations'].splitlines()[1] if len(result['recommendations'].splitlines())>1 else ''}</li>
-                        <li>{result['recommendations'].splitlines()[2] if len(result['recommendations'].splitlines())>2 else ''}</li>
+                        <li>{recs[0]}</li>
+                        <li>{recs[1]}</li>
+                        <li>{recs[2]}</li>
                     </ol>
                 </div>
                 """,
