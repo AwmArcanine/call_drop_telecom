@@ -40,47 +40,64 @@ if run:
             progress.progress(i + 1)
         progress.empty()
 
-    # ---- Agent Response ----
-    st.markdown("### 🧠 Agent Response")
+    # ---- Extract relevant data ----
+    hits = [h for h in result["evidence"] if h["metadata"].get("Region", "").lower() == region.lower()]
+    if not hits:
+        hits = result["evidence"][:1]  # fallback to first available hit
 
-    # --- Extract Recommendations Cleanly ---
+    # --- Use top hit for contextual info ---
+    top = hits[0]["metadata"]
+    tower_id = top.get("Tower_ID", "N/A")
+    signal = top.get("Signal_Str_dBm", "N/A")
+    congestion = top.get("Congestion_Level", "N/A")
+    handoff = top.get("Handoff_Failure_pct", "N/A")
+    drops = top.get("Call_Drops", "N/A")
+    date = top.get("Date", "N/A")
+
+    # Compute dropout rate safely
+    try:
+        dropout_rate = f"{(int(drops)/100):.1f}%"
+    except Exception:
+        dropout_rate = "N/A"
+
+    # Generate Observation heuristically
+    observation = f"Call drops increased to {drops} on {date}."
+    if signal != "N/A":
+        observation += f" Signal levels degraded around {signal} dBm."
+    if "high" in str(congestion).lower():
+        observation += " Congestion detected during peak hours."
+
+    # Build Root Cause line
+    root_cause = (
+        f"Weak signal ({signal} dBm) + {congestion.capitalize()} congestion + {handoff}% handoff failure."
+    )
+
+    # Get recommendations and ensure 3 points
     rec_text = result.get("recommendations", "").strip()
-    # Extract lines like "1. ..." "2. ..." "3. ..." robustly
-    rec_lines = re.findall(r"(?:\d+[\.\)]\s*)([^\n]+)", rec_text)
-    rec_lines = [r.strip() for r in rec_lines if r.strip()]
-
-    # Ensure exactly 3 distinct actionable lines
-    defaults = [
-        "Deploy additional microcells or optimize antenna alignment to improve coverage.",
-        "Tune handoff thresholds and reconfiguration timers to minimize drop events.",
-        "Increase backhaul capacity and conduct targeted drive tests in problem areas."
-    ]
+    rec_lines = re.findall(r"\d+\..+", rec_text)
     if not rec_lines:
-        rec_lines = defaults
-    elif len(rec_lines) < 3:
-        rec_lines.extend(defaults[len(rec_lines):])
+        rec_lines = re.split(r"[.;]\s+", rec_text)
+    rec_lines = [r.strip(" -•\n") for r in rec_lines if len(r.strip()) > 5]
+    while len(rec_lines) < 3:
+        rec_lines.append("Further network optimization required.")
     rec_lines = rec_lines[:3]
 
-    # --- Observation & Root Cause ---
-    summary_text = result.get("summary", "")
-    observation_match = re.search(r"Observation[:\-]\s*(.+)", summary_text, re.IGNORECASE)
-    observation = observation_match.group(1).strip() if observation_match else \
-        "Increased call drops observed due to high user load and moderate congestion levels."
-    root_cause = summary_text or "No specific cause identified."
-
-    # --- Agent Output Block ---
+    # ---- Display Agent Response ----
+    st.markdown("### 🧠 Agent Response")
     st.markdown(
         f"""
         <div style="padding:20px; border-radius:10px; background-color:#f9fafc; border:1px solid #ddd;">
-            <p><b>Region:</b> {region}</p>
-            <p><b>Observation:</b> {observation}</p>
-            <p><b>Root Cause:</b> {root_cause}</p>
-            <p><b>Suggested Resolution:</b></p>
-            <ol>
-                <li>{rec_lines[0]}</li>
-                <li>{rec_lines[1]}</li>
-                <li>{rec_lines[2]}</li>
-            </ol>
+            <ul style="list-style-type:none; padding-left:0;">
+                <li><b>Region:</b> {region}, Tower {tower_id}</li>
+                <li><b>Observation:</b> {observation}</li>
+                <li><b>Root Cause:</b> {root_cause}</li>
+                <li><b>Suggested Resolution:</b></li>
+                <ol>
+                    <li>{rec_lines[0]}</li>
+                    <li>{rec_lines[1]}</li>
+                    <li>{rec_lines[2]}</li>
+                </ol>
+            </ul>
         </div>
         """,
         unsafe_allow_html=True,
@@ -88,8 +105,6 @@ if run:
 
     # ---- Evidence Section ----
     st.markdown("### 📜 Evidence (Top Retrieved Logs)")
-
-    hits = [h for h in result["evidence"] if h["metadata"].get("Region", "").lower() == region.lower()]
 
     if not hits:
         st.info("No evidence found for this region.")
@@ -100,14 +115,13 @@ if run:
             congestion = meta.get("Congestion_Level", "Unknown")
             handoff = meta.get("Handoff_Failure_pct", "N/A")
             drops = meta.get("Call_Drops", "N/A")
+            notes = meta.get("Notes", "No notes available.")
 
-            # Dropout rate (approximate)
             try:
                 dropout_rate = f"{(int(drops)/100):.1f}%"
             except Exception:
                 dropout_rate = "N/A"
 
-            # Congestion severity icons
             if "high" in str(congestion).lower():
                 cong_icon = "🔴 High"
             elif "medium" in str(congestion).lower():
@@ -119,10 +133,11 @@ if run:
                 f"""
                 <div style="padding:10px; margin-bottom:10px; border:1px solid #ddd; border-radius:10px;">
                     <b>Hit {i}: {meta.get('Region')} | {meta.get('Tower_ID')} | {meta.get('Date')}</b><br>
-                    📶 <b>Signal:</b> {signal} dBm &nbsp;|&nbsp; {cong_icon} &nbsp;|&nbsp;
+                    📶 <b>Signal:</b> {signal} dBm &nbsp;|&nbsp;
+                    {cong_icon} &nbsp;|&nbsp;
                     🔁 <b>Handoff Failure:</b> {handoff}% &nbsp;|&nbsp;
                     📉 <b>Dropout Rate:</b> {dropout_rate}<br>
-                    📝 <b>Notes:</b> {meta.get('Notes', 'No notes available.')}<br>
+                    📝 <b>Notes:</b> {notes}<br>
                     <small>Distance Score: {hit.get('distance'):.4f}</small>
                 </div>
                 """,
