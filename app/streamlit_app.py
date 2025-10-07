@@ -1,142 +1,133 @@
-import re
-import sys, os
+import sys, os, re, time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import streamlit as st
 from agents.agent_core import analyze_region_query
-import time
 
-# --- Streamlit Config ---
-st.set_page_config(page_title="AI Call Drop Analyzer", layout="wide")
+# ---- Streamlit Page Setup ----
+st.set_page_config(page_title="Call Drop Analyzer", layout="wide")
 
-# --- Custom Styling ---
-st.markdown("""
-<style>
-    .stApp { background-color: #f9fafb; }
-    .card {
-        background-color: #ffffff;
-        padding: 1rem 1.5rem;
-        border-radius: 10px;
-        box-shadow: 0px 3px 8px rgba(0,0,0,0.08);
-        margin-bottom: 1rem;
-    }
-    .section-title {
-        font-weight: 700;
-        font-size: 1.2rem;
-        color: #1e3a8a;
-        margin-top: 1.2rem;
-    }
-    .metric {
-        font-weight: 600;
-        color: #334155;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# --- Header ---
-st.title("📡 Agent: Call Drop Analysis")
-st.markdown(
-    "This AI agent analyzes telecom network logs to identify **call drop causes**, detect **performance patterns**, "
-    "and recommend **data-driven network optimizations**."
-)
-
-# --- Sidebar (Input Parameters) ---
+# ---- Sidebar ----
 with st.sidebar:
     st.header("🔍 Query Parameters")
-    region = st.selectbox(
-        "Select Region",
-        ["Hyderabad", "Mumbai", "Kolkata", "Delhi", "Chennai"],
-        index=0,
-    )
+    region = st.text_input("Region (optional)", value="Hyderabad")
     tower = st.text_input("Tower ID (optional)", value="")
-    user_q = st.text_area(
-        "Query",
-        value=f"Why are call drops high in {region}?",
-        height=100,
-    )
+    user_q = st.text_area("Query", value=f"Why are call drops high in {region}?")
     run = st.button("🚀 Analyze")
 
-# --- Helper functions for color indicators ---
-def get_congestion_color(level):
-    if not level:
-        return "⚪ Unknown"
-    l = level.lower()
-    if "low" in l: return "🟢 Low"
-    elif "medium" in l: return "🟡 Medium"
-    elif "high" in l: return "🔴 High"
-    return "⚪ Unknown"
+st.title("📊 Agent: Call Drop Analysis")
+st.markdown(
+    "This AI Agent analyzes telecom network logs to explain **call drop causes**, detect **patterns**, "
+    "and suggest **data-driven resolutions** automatically."
+)
 
-def get_signal_color(signal_strength):
-    try:
-        signal = float(signal_strength)
-    except (TypeError, ValueError):
-        return "⚪ Unknown"
-    if signal >= -80:
-        return "🟢 Strong"
-    elif -95 <= signal < -80:
-        return "🟡 Moderate"
-    else:
-        return "🔴 Weak"
+# ---- Cached Analyzer ----
+@st.cache_data(show_spinner=False)
+def cached_analyze(user_q, region):
+    """Cached version to speed up repeated queries."""
+    return analyze_region_query(user_q, region=region)
 
-# --- Main Processing ---
+# ---- Run Agent ----
 if run:
-    progress_bar = st.progress(0, text="Initializing agent...")
+    with st.spinner("⏳ Analyzing network logs..."):
+        progress = st.progress(0)
+        for i in range(50):
+            time.sleep(0.02)
+            progress.progress(i + 1)
+        result = cached_analyze(user_q, region if region else None)
+        for i in range(50, 100):
+            time.sleep(0.02)
+            progress.progress(i + 1)
+        progress.empty()
 
-    with st.spinner("🤖 Running AI analysis... please wait"):
-        try:
-            # Step 1: Retrieve vector data
-            progress_bar.progress(25, text="📡 Retrieving telecom logs...")
-            time.sleep(0.5)
-            result = analyze_region_query(user_q, region=region)
+    # ---- Agent Response ----
+    st.markdown("### 🧠 Agent Response")
 
-            # Step 2: AI reasoning
-            progress_bar.progress(60, text="🧠 Generating AI insights...")
-            time.sleep(0.5)
+    # Safely parse recommendations (guarantee 3)
+    rec_text = result.get("recommendations", "")
+    rec_lines = re.findall(r"\d+\..+", rec_text)
+    if len(rec_lines) < 3:
+        alt_lines = [l.strip() for l in rec_text.split("\n") if l.strip()]
+        rec_lines.extend(alt_lines)
+    while len(rec_lines) < 3:
+        rec_lines.append("Further network optimization required.")
+    rec_lines = [r.strip() for r in rec_lines[:3]]
 
-            # Step 3: Done
-            progress_bar.progress(100, text="✅ Analysis complete!")
-            st.success("AI analysis completed successfully!")
+    # Extract Observation and Root Cause
+    summary_text = result.get("summary", "")
+    observation_match = re.search(r"Observation[:\-]\s*(.+)", summary_text, re.IGNORECASE)
+    observation = observation_match.group(1).strip() if observation_match else \
+        "Recent network monitoring shows a rise in call drops, likely linked to load and signal degradation."
+    root_cause = summary_text or "No specific cause identified."
 
-            # --- Agent Response ---
-            st.markdown("### 🧠 Agent Response")
+    # Display formatted agent findings
+    st.markdown(
+        f"""
+        <div style="padding:20px; border-radius:10px; background-color:#f9fafc; border:1px solid #ddd;">
+            <p><b>Region:</b> {region}</p>
+            <p><b>Observation:</b> {observation}</p>
+            <p><b>Root Cause:</b> {root_cause}</p>
+            <p><b>Suggested Resolution:</b></p>
+            <ol>
+                <li>{rec_lines[0]}</li>
+                <li>{rec_lines[1]}</li>
+                <li>{rec_lines[2]}</li>
+            </ol>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-            # Safely extract recommendations (1., 2., 3.) from model output
-            rec_text = result.get("recommendations", "")
-            rec_lines = re.findall(r"\d+\..+", rec_text)
+    # ---- Recommended Actions Section ----
+    st.markdown("### 🧩 Recommended Actions")
+    st.write(
+        "These steps are prioritized based on signal strength, congestion, and handoff performance."
+    )
+    for i, rec in enumerate(rec_lines, 1):
+        st.markdown(f"**{i}.** {rec}")
 
-            # Fallback handling — guarantee at least 3 items
-            if len(rec_lines) < 3:
-                # Try splitting by newline if regex finds fewer
-                alt_lines = [l.strip() for l in rec_text.split("\n") if l.strip()]
-                rec_lines.extend(alt_lines)
+    # ---- Evidence Section ----
+    st.markdown("### 📜 Evidence (Top Retrieved Logs)")
 
-            # Final fallback defaults
-            while len(rec_lines) < 3:
-                rec_lines.append("Further network optimization required.")
+    # Filter region-specific logs
+    hits = [h for h in result["evidence"] if h["metadata"].get("Region", "").lower() == region.lower()]
 
-            # Clean and keep only first 3
-            rec_lines = [r.strip() for r in rec_lines[:3]]
+    if not hits:
+        st.info("No evidence found for this region.")
+    else:
+        for i, hit in enumerate(hits, 1):
+            meta = hit["metadata"]
+            signal = meta.get("Signal_Str_dBm", "N/A")
+            congestion = meta.get("Congestion_Level", "Unknown")
+            handoff = meta.get("Handoff_Failure_pct", "N/A")
+            drops = meta.get("Call_Drops", "N/A")
 
-            # Display formatted structured output
+            # Compute dropout rate (example)
+            try:
+                dropout_rate = f"{(int(drops)/100):.1f}%"
+            except Exception:
+                dropout_rate = "N/A"
+
+            # Congestion severity icons
+            if "high" in str(congestion).lower():
+                cong_icon = "🔴 High"
+            elif "medium" in str(congestion).lower():
+                cong_icon = "🟠 Medium"
+            else:
+                cong_icon = "🟢 Low"
+
             st.markdown(
                 f"""
-                <div class="card">
-                    <p><b>Region:</b> {region}</p>
-                    <p><b>Observation:</b> (Summarized automatically by the AI model)</p>
-                    <p><b>Root Cause:</b> {result['summary']}</p>
-                    <p><b>Suggested Resolution:</b></p>
-                    <ol>
-                        <li>{rec_lines[0]}</li>
-                        <li>{rec_lines[1]}</li>
-                        <li>{rec_lines[2]}</li>
-                    </ol>
+                <div style="padding:10px; margin-bottom:10px; border:1px solid #ddd; border-radius:10px;">
+                    <b>Hit {i}: {meta.get('Region')} | {meta.get('Tower_ID')} | {meta.get('Date')}</b><br>
+                    📶 <b>Signal:</b> {signal} dBm &nbsp;|&nbsp; {cong_icon} &nbsp;|&nbsp;
+                    🔁 <b>Handoff Failure:</b> {handoff}% &nbsp;|&nbsp;
+                    📉 <b>Dropout Rate:</b> {dropout_rate}<br>
+                    📝 <b>Notes:</b> {meta.get('Notes', 'No notes available.')}<br>
+                    <small>Distance Score: {hit.get('distance'):.4f}</small>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-        except Exception as e:
-            st.error(f"⚠️ Error: {e}")
-
-else:
-    st.info("👈 Enter parameters and click **Analyze** to start the AI-powered analysis.")
+    st.success("✅ Analysis complete.")
