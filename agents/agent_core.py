@@ -81,57 +81,52 @@ def generate_ai_summary(snippets: List[str], region: str = None) -> str:
 # --- AI Recommendations ---
 def generate_ai_recommendations(region: str, metrics: Dict) -> str:
     """
-    Improved version: ensures the model always produces 3 distinct
-    and context-aware technical recommendations.
-    Works well with flan-t5-large and flan-t5-xl.
+    Final fixed version for FLAN-T5 models — produces 3 distinct and accurate
+    recommendations with stable decoding and fallback handling.
     """
     prompt = (
-        f"You are an experienced telecom network engineer.\n"
-        f"Analyze the following metrics for {region} and suggest three precise actions to reduce call drops.\n\n"
-        f"Network Metrics:\n"
-        f"- Average Signal Strength: {metrics.get('avg_signal')} dBm\n"
-        f"- Congestion Level: {metrics.get('congestion_level')}\n"
-        f"- Handoff Failure Rate: {metrics.get('handoff_pct')}%\n"
-        f"- Dropout Rate: {metrics.get('drop_rate')}%\n\n"
-        "Instructions:\n"
-        "1. Suggest exactly three technical actions.\n"
-        "2. Focus on signal, congestion, and handoff optimization.\n"
-        "3. Each line must begin with a number (1., 2., 3.) and include:\n"
-        "   (Action) - Priority: (High/Medium/Low) - (Short reason)\n"
-        "4. Do not add explanations outside the list.\n\n"
-        "Example:\n"
-        "1. Deploy microcells in dense areas - Priority: High - To reduce congestion during peak hours.\n"
-        "2. Optimize antenna tilt and transmit power - Priority: Medium - To improve weak signal zones.\n"
-        "3. Adjust handoff timers - Priority: High - To minimize call drops during mobility.\n\n"
-        "Now write your final 3 recommendations:\n"
+        f"You are a telecom optimization assistant analyzing call drop causes in {region}.\n"
+        f"Metrics:\n"
+        f"Signal Strength: {metrics.get('avg_signal')} dBm\n"
+        f"Congestion Level: {metrics.get('congestion_level')}\n"
+        f"Handoff Failure: {metrics.get('handoff_pct')}%\n"
+        f"Dropout Rate: {metrics.get('drop_rate')}%\n\n"
+        "Generate exactly 3 unique and actionable resolutions to reduce call drops.\n"
+        "Each suggestion must follow this format:\n"
+        "1. (Action) - Priority: (High/Medium/Low) - (Short reason)\n"
+        "2. (Action) - Priority: (High/Medium/Low) - (Short reason)\n"
+        "3. (Action) - Priority: (High/Medium/Low) - (Short reason)\n"
+        "Keep it concise and data-driven.\n"
     )
 
-    response = llm(prompt, max_new_tokens=200, do_sample=False, temperature=0.3)[0]["generated_text"]
+    # Generate response using deterministic decoding
+    response = llm(
+        prompt,
+        max_new_tokens=200,
+        do_sample=False,
+        num_beams=1,
+        temperature=0.0,
+        repetition_penalty=1.2,
+    )[0]["generated_text"]
 
-    # --- Clean and extract numbered suggestions ---
-    lines = [ln.strip() for ln in response.split("\n") if ln.strip()]
+    # --- Parse output cleanly ---
     recs = []
-    for ln in lines:
-        if ln.startswith(("1.", "2.", "3.")):
-            recs.append(ln)
-        elif any(k in ln.lower() for k in ["priority", "optimize", "deploy", "handoff", "signal", "congestion"]):
-            recs.append(f"{len(recs)+1}. {ln}")
+    for line in response.split("\n"):
+        line = line.strip()
+        if line.startswith(("1.", "2.", "3.")):
+            recs.append(line)
+        elif len(recs) < 3 and any(word in line.lower() for word in ["optimize", "deploy", "handoff", "antenna", "backhaul", "signal"]):
+            recs.append(f"{len(recs)+1}. {line}")
 
-    # --- Fallbacks if fewer than 3 ---
-    default_recs = [
-        "1. Deploy additional microcells or small cells during peak hours - Priority: High - To improve coverage and reduce congestion.",
-        "2. Fine-tune handoff thresholds and reconfiguration timers - Priority: Medium - To reduce failed handovers.",
-        "3. Increase backhaul capacity and monitor throughput - Priority: Medium - To improve data flow efficiency.",
-    ]
-
+    # --- Hard fallback if model misses structure ---
     if len(recs) < 3:
-        recs = default_recs[:3]
-    elif len(recs) > 3:
-        recs = recs[:3]
+        recs = [
+            "1. Optimize antenna tilt and power settings - Priority: High - To improve weak signal coverage.",
+            "2. Deploy microcells in dense areas - Priority: High - To reduce congestion during peak hours.",
+            "3. Fine-tune handoff thresholds - Priority: Medium - To prevent dropped calls during mobility.",
+        ]
 
-    return "\n".join(recs)
-
-
+    return "\n".join(recs[:3])
 
 
 # --- Main Analysis ---
