@@ -20,7 +20,7 @@ EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 HF_MODEL_NAME = "google/flan-t5-large"
 
 hf_token = os.getenv("HUGGINGFACE_TOKEN")
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cuda"
 TOP_K = 5
 
 
@@ -39,7 +39,9 @@ llm = pipeline(
     tokenizer=tokenizer,
     device=0 if DEVICE == "cuda" else -1,
     max_new_tokens=250,
+    torch_dtype=torch.float16,
     temperature=0.2,
+    device_map="auto"
 )
 
 print("✅ Model loaded successfully: MBZUAI/LaMini-Flan-T5-248M")
