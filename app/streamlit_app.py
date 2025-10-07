@@ -103,24 +103,24 @@ if run:
             recs = [r.strip() for r in result["recommendations"].split("\n") if r.strip() and r[0].isdigit()]
             if len(recs) < 3:
                 # if the LLM only gave 1–2, add placeholders
-                recs += ["Further analysis required.", "Run additional network diagnostics."]
+                 recs.append("Further network optimization required.")
 
             st.markdown(
-                f"""
-                <div class="card">
-                    <p><b>Region:</b> {region}</p>
-                    <p><b>Observation:</b> (Summarized automatically by the AI model)</p>
-                    <p><b>Root Cause:</b> {result['summary']}</p>
-                    <p><b>Suggested Resolution:</b></p>
-                    <ol>
-                        <li>{recs[0]}</li>
-                        <li>{recs[1]}</li>
-                        <li>{recs[2]}</li>
-                    </ol>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            f"""
+            <div class="card">
+                <p><b>Region:</b> {region}</p>
+                <p><b>Observation:</b> (Summarized automatically by the AI model)</p>
+                <p><b>Root Cause:</b> {result['summary']}</p>
+                <p><b>Suggested Resolution:</b></p>
+                <ol>
+                    <li>{recs[0]}</li>
+                    <li>{recs[1]}</li>
+                    <li>{recs[2]}</li>
+                </ol>
+            </div>
+            """,
+            unsafe_allow_html=True,
+             )
 
             # --- Evidence Section ---
             st.markdown("### 📂 Evidence (Top Retrieved Logs)")
