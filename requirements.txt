@@ -1,0 +1,10 @@
+langchain>=0.0.300
+sentence-transformers>=2.2.2
+chromadb>=0.3.29
+transformers>=4.40.0
+torch>=2.0.0
+streamlit>=1.25.0
+pandas>=2.0.0
+tqdm
+pydantic
+python-dotenv
