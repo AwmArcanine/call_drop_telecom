@@ -1,87 +1,143 @@
 # agents/agent_core.py
 from typing import List, Dict
+import os
+import torch
 import chromadb
 from sentence_transformers import SentenceTransformer
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, pipeline
-import torch
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    pipeline,
+)
 
 # --- Configurable ---
 CHROMA_DIR = "chroma_db"
 COLLECTION_NAME = "telecom_logs"
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
-HF_MODEL_NAME = "MBZUAI/LaMini-Flan-T5-248M"  # Faster than flan-t5-base but still smart
+
+# Preferred models (TCS requirement)
+PRIMARY_MODEL = "mistralai/Mistral-7B-Instruct-v0.1"
+FALLBACK_MODEL = "MBZUAI/LaMini-Flan-T5-248M"
+
+hf_token = os.getenv("HUGGINGFACE_TOKEN")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TOP_K = 5
 
-# --- Initialize components ---
+
+# --- Initialize Chroma and Embedding ---
 chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
 collection = chroma_client.get_collection(COLLECTION_NAME)
 embedder = SentenceTransformer(EMBED_MODEL_NAME)
 
-tokenizer = AutoTokenizer.from_pretrained(HF_MODEL_NAME)
-model = AutoModelForSeq2SeqLM.from_pretrained(HF_MODEL_NAME)
-llm = pipeline("text2text-generation", model=model, tokenizer=tokenizer, device=0 if DEVICE == "cuda" else -1)
+
+# --- Try to load Mistral (preferred), else fallback to LaMini ---
+def load_llm():
+    try:
+        print("🚀 Loading Mistral-7B-Instruct...")
+        tokenizer = AutoTokenizer.from_pretrained(PRIMARY_MODEL, token=hf_token)
+        model = AutoModelForCausalLM.from_pretrained(
+            PRIMARY_MODEL,
+            token=hf_token,
+            torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
+            device_map="auto" if DEVICE == "cuda" else None,
+        )
+        llm = pipeline(
+            "text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            max_new_tokens=256,
+            temperature=0.3,
+            repetition_penalty=1.1,
+        )
+        print("✅ Mistral model loaded successfully.")
+        return llm, "Mistral-7B-Instruct"
+    except Exception as e:
+        print(f"⚠️ Mistral load failed: {e}\n➡️ Falling back to LaMini-Flan-T5...")
+        tokenizer = AutoTokenizer.from_pretrained(FALLBACK_MODEL)
+        model = AutoModelForSeq2SeqLM.from_pretrained(FALLBACK_MODEL)
+        llm = pipeline(
+            "text2text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            device=0 if DEVICE == "cuda" else -1,
+        )
+        return llm, "LaMini-Flan-T5"
+
+
+llm, active_model = load_llm()
+
 
 # --- Tools ---
 def query_vector_db(query_text: str, top_k: int = TOP_K) -> List[Dict]:
     q_emb = embedder.encode([query_text], convert_to_numpy=True)[0].tolist()
-    res = collection.query(query_embeddings=[q_emb], n_results=top_k, include=["metadatas", "documents", "distances"])
+    res = collection.query(
+        query_embeddings=[q_emb],
+        n_results=top_k,
+        include=["metadatas", "documents", "distances"],
+    )
     items = []
     for doc, meta, dist in zip(res["documents"][0], res["metadatas"][0], res["distances"][0]):
         items.append({"document": doc, "metadata": meta, "distance": float(dist)})
     return items
 
+
+# --- AI Summary ---
 def generate_ai_summary(snippets: List[str], region: str = None) -> str:
     prompt = (
         f"You are a telecom network expert analyzing call drop logs.\n"
         f"Region: {region or 'Unknown'}.\n"
-        "Summarize the causes of call drops, referencing signal strength, congestion, and handoff failures.\n\n"
-        "Here are the log entries:\n"
+        "Summarize the insights in the following structure:\n"
+        "Region: (detected region)\n"
+        "Observation: (summarize any trend or increase in call drops)\n"
+        "Root Cause: (explain main causes using signal, congestion, and handoff data)\n"
+        "Short Summary: (one concise statement)\n\n"
+        "Logs:\n"
     )
     for s in snippets:
         prompt += f"- {s}\n"
-    prompt += (
-        "\nRespond in 2-3 sentences with: Region, Observation, Root Cause, and Short Summary."
-    )
-    response = llm(prompt, max_new_tokens=150, do_sample=False)[0]["generated_text"]
-    return response
+    prompt += "\nRespond in 3-4 sentences maximum."
+    response = llm(prompt, max_new_tokens=200, do_sample=False)[0]["generated_text"]
+    return response.strip()
 
+
+# --- AI Recommendations ---
 def generate_ai_recommendations(region: str, metrics: Dict) -> str:
     prompt = (
-        f"You are a telecom optimization assistant. Analyze the network conditions for region {region}.\n"
+        f"You are a telecom optimization assistant for region {region}.\n"
         f"Metrics:\n"
-        f"- Average Signal Strength: {metrics.get('avg_signal')} dBm\n"
+        f"- Avg Signal Strength: {metrics.get('avg_signal')} dBm\n"
         f"- Congestion Level: {metrics.get('congestion_level')}\n"
         f"- Handoff Failure Rate: {metrics.get('handoff_pct')}%\n"
         f"- Dropout Rate: {metrics.get('drop_rate')}%\n\n"
-        "Based on these, suggest **exactly three technical resolutions** to reduce call drops.\n"
-        "Each suggestion must start with a number (1., 2., 3.) and include:\n"
-        "- Specific action (e.g., deploy microcells, adjust handoff thresholds)\n"
-        "- Priority (High/Medium/Low)\n"
-        "- One-line rationale.\n\n"
-        "Output Format:\n"
+        "Suggest exactly **three** network resolutions in this format:\n"
         "1. (Action) - Priority: (High/Medium/Low) - (Short reason)\n"
-        "2. ...\n"
-        "3. ..."
+        "2. (Action) - Priority: (High/Medium/Low) - (Short reason)\n"
+        "3. (Action) - Priority: (High/Medium/Low) - (Short reason)"
     )
 
-    rec = llm(prompt, max_new_tokens=250, do_sample=False)[0]["generated_text"]
-    return rec
+    rec = llm(prompt, max_new_tokens=300, do_sample=False)[0]["generated_text"]
+    return rec.strip()
 
 
 # --- Main Analysis ---
 def analyze_region_query(user_query: str, region: str = None):
     hits = query_vector_db(user_query if not region else f"Region: {region}")
-    snippets = [h["document"] for h in hits if not region or h["metadata"].get("Region", "").lower() == region.lower()]
+    # Filter relevant region results
+    snippets = [
+        h["document"]
+        for h in hits
+        if not region or h["metadata"].get("Region", "").lower() == region.lower()
+    ]
 
     summary_txt = generate_ai_summary(snippets, region=region)
 
+    # Extract metrics
     if hits:
         top_meta = hits[0]["metadata"]
         call_drops = float(top_meta.get("Call_Drops", 0))
-        total_calls = 1000  # assume normalized base if not available
+        total_calls = 1000  # assumed base
         drop_rate = round((call_drops / total_calls) * 100, 2)
-
         metrics = {
             "region": region or top_meta.get("Region"),
             "avg_signal": top_meta.get("Signal_Str_dBm"),
@@ -98,4 +154,5 @@ def analyze_region_query(user_query: str, region: str = None):
         "summary": summary_txt,
         "recommendations": recs,
         "evidence": hits,
+        "model_used": active_model,
     }
