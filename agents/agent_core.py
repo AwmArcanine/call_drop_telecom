@@ -41,14 +41,17 @@ def load_llm():
             token=hf_token,
             torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
             device_map="auto" if DEVICE == "cuda" else None,
+            use_auth_token=hf_token,
         )
         llm = pipeline(
             "text-generation",
             model=model,
             tokenizer=tokenizer,
+            device=0 if DEVICE == "cuda" else -1,
             max_new_tokens=256,
             temperature=0.3,
             repetition_penalty=1.1,
+            top_p=0.9,
         )
         print("✅ Mistral model loaded successfully.")
         return llm, "Mistral-7B-Instruct"
