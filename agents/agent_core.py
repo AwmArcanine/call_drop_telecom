@@ -17,7 +17,7 @@ CHROMA_DIR = "chroma_db"
 COLLECTION_NAME = "telecom_logs"
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 
-HF_MODEL_NAME = "google/flan-t5-base"
+HF_MODEL_NAME = "google/flan-t5-large"
 
 hf_token = os.getenv("HUGGINGFACE_TOKEN")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
