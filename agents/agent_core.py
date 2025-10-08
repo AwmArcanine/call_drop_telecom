@@ -6,7 +6,6 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 from transformers import (
     AutoTokenizer,
-    AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     pipeline,
 )
@@ -16,58 +15,33 @@ CHROMA_DIR = "chroma_db"
 COLLECTION_NAME = "telecom_logs"
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 
-PRIMARY_MODEL = "mistralai/Mistral-7B-Instruct-v0.1"  # main model
-FALLBACK_MODEL = "google/flan-t5-large"               # fallback
-hf_token = os.getenv("HUGGINGFACE_TOKEN")
-
+PRIMARY_MODEL = "MBZUAI/LaMini-Flan-T5-248M"  # Fast + reasoning capable
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TOP_K = 5
-
 
 # --- Initialize Chroma and Embedding ---
 chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
 collection = chroma_client.get_collection(COLLECTION_NAME)
 embedder = SentenceTransformer(EMBED_MODEL_NAME)
 
-
-# --- Load Mistral (or fallback to Flan-T5) ---
-def load_llm():
-    try:
-        print("🚀 Loading Mistral-7B-Instruct...")
-        tokenizer = AutoTokenizer.from_pretrained(PRIMARY_MODEL, token=hf_token)
-        model = AutoModelForCausalLM.from_pretrained(
-            PRIMARY_MODEL,
-            token=hf_token,
-            torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
-            device_map="auto" if DEVICE == "cuda" else None,
-        )
-        llm = pipeline(
-            "text-generation",
-            model=model,
-            tokenizer=tokenizer,
-            device=0 if DEVICE == "cuda" else -1,
-            max_new_tokens=250,
-            temperature=0.3,
-            repetition_penalty=1.1,
-            top_p=0.9,
-        )
-        print("✅ Mistral model loaded successfully.")
-        return llm, "Mistral-7B-Instruct"
-    except Exception as e:
-        print(f"⚠️ Mistral load failed: {e}\n➡️ Falling back to Flan-T5...")
-        tokenizer = AutoTokenizer.from_pretrained(FALLBACK_MODEL)
-        model = AutoModelForSeq2SeqLM.from_pretrained(FALLBACK_MODEL)
-        llm = pipeline(
-            "text2text-generation",
-            model=model,
-            tokenizer=tokenizer,
-            device=0 if DEVICE == "cuda" else -1,
-        )
-        return llm, "Flan-T5"
-
-
-llm, active_model = load_llm()
-print(f"🧠 Active model in use: {active_model}")
+# --- Load Fast Reasoning Model ---
+print(f"🚀 Loading model: {PRIMARY_MODEL}")
+tokenizer = AutoTokenizer.from_pretrained(PRIMARY_MODEL)
+model = AutoModelForSeq2SeqLM.from_pretrained(
+    PRIMARY_MODEL,
+    torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
+    device_map="auto" if DEVICE == "cuda" else None,
+)
+llm = pipeline(
+    "text2text-generation",
+    model=model,
+    tokenizer=tokenizer,
+    device=0 if DEVICE == "cuda" else -1,
+    max_new_tokens=250,
+    temperature=0.3,
+    repetition_penalty=1.1,
+)
+print("✅ Model ready and optimized for reasoning-speed balance.")
 
 
 # --- Query Vector DB ---
@@ -90,13 +64,12 @@ def generate_ai_summary(snippets: List[str], region: str = None) -> str:
         return "No sufficient log data available to summarize."
     
     prompt = (
-        f"You are a telecom expert analyzing call drop data.\n"
-        f"Region: {region or 'Unknown'}\n\n"
-        "Based on the logs below, summarize the issue in this format:\n"
+        f"You are a telecom expert analyzing call drop data for {region or 'Unknown'}.\n"
+        "Summarize the issue in this structure:\n"
         "Region: (name)\n"
         "Observation: (trend in call drops, signal, congestion)\n"
-        "Root Cause: (technical reasons like weak signal, congestion, handoff failure)\n"
-        "Suggested Resolution Summary: (1-line actionable insight)\n\n"
+        "Root Cause: (main causes such as weak signal, congestion, or handoff failure)\n"
+        "Suggested Resolution Summary: (short actionable insight)\n\n"
         "Logs:\n"
     )
     for s in snippets:
@@ -106,42 +79,58 @@ def generate_ai_summary(snippets: List[str], region: str = None) -> str:
     return response.strip()
 
 
-# --- AI Recommendations (no hardcoding) ---
+# --- AI Recommendations ---
+# --- AI Recommendations ---
 def generate_ai_recommendations(region: str, metrics: Dict) -> str:
+    """
+    Generates 3 reasoning-based, dynamic telecom recommendations.
+    This version ensures the model output is used — no unnecessary fallback.
+    """
     prompt = (
-        f"You are a telecom optimization assistant for region {region}.\n"
+        f"You are a telecom optimization expert analyzing call drop issues in {region}.\n"
         f"Metrics:\n"
-        f"- Avg Signal Strength: {metrics.get('avg_signal')} dBm\n"
+        f"- Average Signal Strength: {metrics.get('avg_signal')} dBm\n"
         f"- Congestion Level: {metrics.get('congestion_level')}\n"
         f"- Handoff Failure Rate: {metrics.get('handoff_pct')}%\n"
         f"- Dropout Rate: {metrics.get('drop_rate')}%\n\n"
-        "Based on this data, suggest exactly three technical actions to reduce call drops.\n"
-        "Each line should include:\n"
-        "1. (Action) - Priority: (High/Medium/Low) - (Short reason)\n"
-        "2. (Action) - Priority: (High/Medium/Low) - (Short reason)\n"
-        "3. (Action) - Priority: (High/Medium/Low) - (Short reason)\n\n"
-        "Respond with only the three lines, no explanation before or after."
+        "Based on these metrics, propose exactly three actionable network improvements "
+        "to reduce call drops. Use short, clear sentences — each one should focus on a different area.\n"
+        "Follow this format exactly:\n\n"
+        "1. (Action) - Priority: (High/Medium/Low) - (Reason)\n"
+        "2. (Action) - Priority: (High/Medium/Low) - (Reason)\n"
+        "3. (Action) - Priority: (High/Medium/Low) - (Reason)\n\n"
+        "Focus on signal strength, congestion, and handoff optimization. Avoid repeating generic lines."
     )
 
-    response = llm(prompt, max_new_tokens=250, do_sample=False)[0]["generated_text"]
+    response = llm(prompt, max_new_tokens=250, do_sample=False)[0]["generated_text"].strip()
 
-    lines = [ln.strip() for ln in response.split("\n") if ln.strip()]
-    recs = [ln for ln in lines if ln.startswith(("1.", "2.", "3."))]
+    # --- Parse and clean model output ---
+    import re
+    # Extract lines that start with 1., 2., 3. (even if embedded in text)
+    recs = re.findall(r"\d\.\s?.*?(?=(?:\d\.|$))", response, re.DOTALL)
+    recs = [r.strip() for r in recs if len(r.strip()) > 8]
 
-    if not recs or len(recs) < 3:
+    # If model outputs a continuous paragraph, split heuristically
+    if not recs and "-" in response:
+        recs = [s.strip() for s in response.split("-") if len(s.strip()) > 8][:3]
+        recs = [f"{i+1}. {r}" for i, r in enumerate(recs)]
+
+    # Fallback only if the model really failed
+    if len(recs) < 3:
+        print("⚠️ Model returned incomplete recommendations — fallback triggered.")
         recs = [
-            "1. Deploy additional microcells in high-load areas - Priority: High - To reduce congestion.",
-            "2. Optimize antenna alignment and power - Priority: Medium - To improve signal quality.",
-            "3. Adjust handoff timers and thresholds - Priority: Medium - To reduce dropouts.",
+            "1. Optimize antenna tilt and power - Priority: High - To improve weak signal coverage.",
+            "2. Deploy additional small cells - Priority: High - To reduce congestion during peak hours.",
+            "3. Fine-tune handoff thresholds - Priority: Medium - To reduce dropped calls during mobility.",
         ]
 
     return "\n".join(recs[:3])
 
 
+
 # --- Main Analysis ---
 def analyze_region_query(user_query: str, region: str = None):
     hits = query_vector_db(user_query if not region else f"Region: {region}")
-
     snippets = [
         h["document"]
         for h in hits
@@ -150,7 +139,6 @@ def analyze_region_query(user_query: str, region: str = None):
 
     summary_txt = generate_ai_summary(snippets, region=region)
 
-    # --- Extract metrics for recommendations ---
     if hits:
         top_meta = hits[0]["metadata"]
         call_drops = float(top_meta.get("Call_Drops", 0))
