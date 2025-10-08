@@ -80,85 +80,110 @@ def generate_ai_summary(snippets: List[str], region: str = None) -> str:
 
 
 # --- AI Recommendations ---
-def generate_ai_recommendations(region: str, metrics: Dict) -> str:
+def generate_ai_recommendations(region: str, metrics: Dict, root_cause: str = None) -> str:
     """
-    Generates precise, region-aware technical recommendations for telecom engineers.
-    The output uses realistic optimization actions (antenna tilt, small cells, TTT tuning, etc.)
-    based on the root cause and metrics observed.
+    Produce 3 concise, non-hardcoded recommendations tied to the root cause.
+    The model should produce high-level engineering actions (no fixed values).
     """
+    # Prepare metric/context summary (human-readable)
     signal = metrics.get("avg_signal")
-    congestion = str(metrics.get("congestion_level")).lower()
-    handoff = float(metrics.get("handoff_pct") or 0)
-    drop = float(metrics.get("drop_rate") or 0)
+    congestion = metrics.get("congestion_level")
+    handoff = metrics.get("handoff_pct")
+    drop_rate = metrics.get("drop_rate")
 
-    issues = []
-    if signal and float(signal) < -90:
-        issues.append("weak signal strength")
-    if "high" in congestion:
-        issues.append("high congestion")
-    if handoff > 10:
-        issues.append("frequent handoff failures")
-    if not issues:
-        issues.append("minor network performance variations")
+    context_lines = []
+    if signal is not None:
+        context_lines.append(f"Average signal: {signal} dBm")
+    if congestion:
+        context_lines.append(f"Congestion level: {congestion}")
+    if handoff is not None:
+        context_lines.append(f"Handoff failures: {handoff}%")
+    if drop_rate is not None:
+        context_lines.append(f"Dropout rate: {drop_rate}%")
+    context_summary = "; ".join(context_lines) if context_lines else "No numeric metrics available."
 
-    issue_summary = ", ".join(issues)
-
-    # More structured, technically grounded prompt
+    # Root cause short summary (prefer explicit root_cause text if passed)
+    rc_text = (root_cause.strip() if root_cause else "No explicit root cause provided.")
+    
+    # Prompt emphasizes *no hardcoded numbers*, actionable but general steps
     prompt = (
-        f"You are a telecom network optimization engineer analyzing call drop logs for region {region}.\n"
-        f"Detected conditions:\n"
-        f"- Average Signal Strength: {signal} dBm\n"
-        f"- Congestion Level: {congestion}\n"
-        f"- Handoff Failure Rate: {handoff}%\n"
-        f"- Dropout Rate: {drop}%\n\n"
-        f"Root cause summary: {issue_summary}.\n\n"
-        f"Generate exactly 3–5 region-specific recommendations with measurable actions engineers can implement.\n"
-        f"Each recommendation must mention specific network parameters, equipment, or configuration changes.\n"
-        f"Use the following format:\n"
-        f"1. <Action> - Priority: <High/Medium/Low> - <Technical justification>\n\n"
-        f"Example recommendations:\n"
-        f"1. Increase antenna tilt by +2° for tower T951 in {region} to improve coverage in weak-signal zones. - Priority: High - Signal observed at -95 dBm.\n"
-        f"2. Deploy an additional microcell in {region} near the congested cluster to reduce PRB load by 20%. - Priority: High - Congestion detected during evening hours.\n"
-        f"3. Adjust handoff Time-To-Trigger (TTT) from 80 ms to 120 ms for smoother cell transitions. - Priority: Medium - 13% handoff failures between adjacent cells.\n\n"
-        f"Now generate new, unique, technically valid recommendations for this region only:"
+        f"You are a telecom optimization engineer advisor. Analyze the following situation and suggest 3 "
+        f"distinct, practical, non-numeric, engineering actions that field or RAN engineers can take.\n\n"
+        f"Region: {region}\n"
+        f"Root cause summary: {rc_text}\n"
+        f"Context metrics: {context_summary}\n\n"
+        "Requirements for the output:\n"
+        "- Return exactly three numbered recommendations (1., 2., 3.).\n"
+        "- Each recommendation should be an actionable, non-hardcoded instruction (no fixed parameter values, no site IDs).\n"
+        "- Each recommendation must include a one-line rationale tied to the root cause/context.\n"
+        "- Use engineering language but keep it concise (1-2 lines per recommendation).\n\n"
+        "Example (bad): 'Retilt antenna by +3° on tower T951.'   <-- DO NOT do this.\n"
+        "Example (good): 'Adjust antenna orientation and power to improve coverage in the weak-signal zones. - Rationale: weak RSRP and high call drops near cell edge.'\n\n"
+        "Now generate the 3 recommendations."
     )
 
-    response = llm(
-        prompt,
-        max_new_tokens=300,
-        do_sample=True,
-        temperature=0.5,
-        top_p=0.9,
-        repetition_penalty=1.2,
-    )[0]["generated_text"].strip()
+    # Ask the LLM
+    try:
+        resp = llm(
+            prompt,
+            max_new_tokens=220,
+            do_sample=True,
+            temperature=0.45,
+            top_p=0.9,
+            repetition_penalty=1.05,
+        )[0]["generated_text"].strip()
+    except Exception as e:
+        # If the model call fails, fall back to logic-based text suggestions
+        print(f"⚠️ LLM error in generate_ai_recommendations: {e}")
+        resp = ""
 
+    # Simple extraction of lines starting with numbers
     import re
-    recs = re.findall(r"\d\.\s?.*?(?=\d\.|$)", response, re.DOTALL)
+    recs = re.findall(r"^\s*\d+\.\s*(.+)$", resp, flags=re.MULTILINE)
     recs = [r.strip() for r in recs if len(r.strip()) > 10]
 
-    # If AI output is invalid or generic, create a logic-based fallback
+    # If LLM didn't return the requested numbered lines, try splitting heuristically
     if len(recs) < 3:
-        print("⚙️ Fallback: Using logic-based engineering recommendations.")
-        recs = []
-        i = 1
-        if signal and float(signal) < -85:
-            recs.append(f"{i}. Retilt antennas for low-coverage sectors in {region} by +3° and verify RSRP improvement. - Priority: High - Weak signal around {signal} dBm.")
-            i += 1
-        if "high" in congestion:
-            recs.append(f"{i}. Add one microcell near dense zones in {region} or enable load balancing on nearby towers. - Priority: High - Heavy congestion detected.")
-            i += 1
-        if handoff > 10:
-            recs.append(f"{i}. Increase handoff margin and TTT by 30–50 ms to reduce drop rate caused by premature transitions. - Priority: Medium - {handoff}% handoff failure rate.")
-            i += 1
-        if drop > 5:
-            recs.append(f"{i}. Upgrade backhaul link and monitor throughput on high-traffic nodes. - Priority: Medium - Drop rate {drop}%.")
-            i += 1
-        if len(recs) < 3:
-            recs.append(f"{i}. Conduct a field drive test in {region} to verify coverage and signal overlap. - Priority: Medium - To validate configuration changes.")
+        # try to pull any lines separated by blank lines or sentence boundaries
+        candidates = [s.strip() for s in re.split(r"\n{1,}|\.\s+", resp) if len(s.strip()) > 10]
+        # keep up to 3 unique, non-placeholder suggestions
+        for c in candidates:
+            if len(recs) >= 3:
+                break
+            if "action" in c.lower() or "recommend" in c.lower() or any(word in c.lower() for word in ["antenna", "microcell", "handoff", "drive test", "backhaul", "balanc"]):
+                recs.append(c)
     
-    return "\n".join(recs[:5])
+    # Final logic-guided fallback if still insufficient: generate non-hardcoded steps based on detected issues
+    if len(recs) < 3:
+        print("⚙️ Recommendation fallback: using rule-guided phrasing.")
+        fallback = []
+        # prioritize by detected root cause keywords
+        rc_lower = rc_text.lower()
+        if "signal" in rc_lower or (signal is not None and float(signal) < -90):
+            fallback.append("Optimize RF coverage (adjust antenna orientation, downtilt/uptilt strategy, or power settings) and validate via targeted drive tests - Rationale: to improve user RSRP and reduce edge-area call drops.")
+        if "congest" in rc_lower or (isinstance(congestion, str) and "high" in congestion.lower()) or (drop_rate and drop_rate > 2):
+            fallback.append("Implement capacity and load management (e.g., enable load balancing, offload heavy traffic to small cells or carriers) and monitor PRB/throughput during peaks - Rationale: to reduce congestion-driven call drops.")
+        if "handoff" in rc_lower or (handoff and float(handoff) > 5):
+            fallback.append("Tune handoff/handover strategy and neighbor relations (review timers, margins, and neighbor lists) and validate mobility scenarios - Rationale: to reduce failures during cell transitions.")
+        # generic if still less than 3
+        if len(fallback) < 3:
+            fallback.append("Schedule routine drive tests and targeted KPI monitoring for the affected hours to validate the impact of any changes - Rationale: ensures fixes are verified in real conditions.")
+        # collect up to 3
+        recs = fallback[:3]
 
+    # Final normalization: ensure no placeholder tokens and concise phrasing
+    normalized = []
+    for i, r in enumerate(recs[:3], start=1):
+        # remove any residual numbering from LLM and enforce format "1. <text> - Rationale: ..."
+        text = re.sub(r"^\s*\d+\.\s*", "", r).strip()
+        # if the text already contains a rationale separated by '-' or '—', keep it, else append generic label
+        if "-" in text:
+            final = f"{i}. {text}"
+        else:
+            final = f"{i}. {text} - Rationale: related to the detected root cause."
+        normalized.append(final)
 
+    return "\n".join(normalized)
 
 
 # --- Main Analysis ---
