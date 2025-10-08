@@ -78,88 +78,148 @@ def generate_ai_summary(snippets: List[str], region: str = None) -> str:
     response = llm(prompt, max_new_tokens=250, do_sample=False)[0]["generated_text"]
     return response.strip()
 
+import re
+from typing import Dict, List
 
-# --- AI Recommendations ---
-def generate_ai_recommendations(region: str, metrics: Dict, root_cause: str = None) -> str:
+def fallback_recs(region: str, metrics: Dict, meta: Dict = None) -> List[str]:
     """
-    Generates practical, context-aware recommendations for telecom optimization.
-    The number of recommendations is adaptive (2–5). 
-    Focuses on real causes — no placeholders, no rigid format.
+    deterministic, engineering-focused fallback recommendations.
+    Not a placeholder — each item is action-oriented and includes steps/timeframe.
     """
-    signal = metrics.get("avg_signal")
+    recs = []
+    tower = (meta or {}).get("Tower_ID") or "target tower"
+    sig = metrics.get("avg_signal")
     congestion = str(metrics.get("congestion_level") or "").lower()
     handoff = float(metrics.get("handoff_pct") or 0)
-    drop = float(metrics.get("drop_rate") or 0)
+    drops = float(metrics.get("drop_rate") or 0)
 
-    # Summarize current network condition
-    detected_issues = []
-    if signal and float(signal) < -90:
-        detected_issues.append("weak signal strength")
-    if "high" in congestion:
-        detected_issues.append("high network congestion")
+    # signal-focused
+    if sig is not None and float(sig) < -90:
+        recs.append(
+            f"Optimize RF coverage at {tower}: perform antenna re-tilt (+2° → +4°) on affected sectors, "
+            "increase TX power by up to 1–2 dB if allowed, then run a targeted drive test within 7 days "
+            "and collect RSRP/RSRQ/SINR to validate impact. Priority: High."
+        )
+
+    # congestion-focused
+    if "high" in congestion or drops > 5:
+        recs.append(
+            "Reduce congestion through capacity and scheduler actions: deploy 1 microcell in the top hotspot "
+            "or enable carrier aggregation on busiest carriers; tune scheduler (increase PRB allocation for voice) "
+            "and re-run load tests during peak hours. Start with 1 cell and evaluate after 2 weeks. Priority: High."
+        )
+
+    # handoff-focused
     if handoff > 8:
-        detected_issues.append("handoff failures")
-    if not detected_issues:
-        detected_issues.append("moderate signal quality with minor performance issues")
+        recs.append(
+            "Optimize handoff performance: review neighbor lists, reduce hysteresis by 0.5–2 dB and time-to-trigger "
+            "to 40–80 ms where appropriate, then monitor handover success metrics for 72 hours. Priority: Medium."
+        )
 
-    issue_summary = ", ".join(detected_issues)
-    rc_summary = root_cause or f"Detected {issue_summary} in {region}."
+    # generic stability / diagnostics
+    if len(recs) < 3:
+        recs.append(
+            "Run a targeted root-cause validation: schedule drive tests, sample logs (RSRP/RSRQ/SINR, load, KPIs), "
+            "and compare worst-performing sectors to neighboring sectors. Use results to select targeted fixes. Priority: Medium."
+        )
 
-    prompt = (
-        f"You are a senior telecom optimization engineer assigned to {region}.\n"
-        f"Root Cause Summary: {rc_summary}\n"
-        f"Network Metrics:\n"
-        f"- Signal Strength: {signal} dBm\n"
-        f"- Congestion Level: {congestion}\n"
-        f"- Handoff Failures: {handoff}%\n"
-        f"- Dropout Rate: {drop}%\n\n"
-        "Provide detailed, technically actionable recommendations to reduce call drops.\n"
-        "Write 2–5 recommendations (no placeholders, no forced numbering). Each should be unique, "
-        "concise, and based on real telecom practices.\n"
-        "Focus areas include:\n"
-        "- Improving RF coverage and signal quality\n"
-        "- Managing congestion and load balancing\n"
-        "- Optimizing handoff performance\n"
-        "- Preventing future call drops through proactive measures\n\n"
-        "Respond in complete sentences suitable for an engineer’s report."
+    # ensure uniqueness and reasonable length
+    unique = []
+    for r in recs:
+        if r not in unique:
+            unique.append(r)
+    return unique[:5]
+
+
+
+# --- AI Recommendations ---
+def generate_ai_recommendations(region: str, metrics: Dict, meta: Dict = None) -> str:
+    """
+    Adaptive recommendation generator:
+    - Asks the model for concise, engineer-friendly actions
+    - Parses numbered output robustly
+    - If the model output is missing / generic / repetitive, falls back to `fallback_recs`
+    - Returns a newline-separated bullet-list string (ready for display)
+    """
+    # Build a concise context describing core problems
+    sig = metrics.get("avg_signal")
+    congestion = metrics.get("congestion_level")
+    handoff = metrics.get("handoff_pct")
+    drop_rate = metrics.get("drop_rate")
+
+    root_summary = []
+    if sig is not None:
+        root_summary.append(f"avg_signal={sig} dBm")
+    if congestion:
+        root_summary.append(f"congestion={congestion}")
+    if handoff is not None:
+        root_summary.append(f"handoff_pct={handoff}%")
+    if drop_rate is not None:
+        root_summary.append(f"drop_rate={drop_rate}%")
+    ctx = ", ".join(root_summary) if root_summary else "no numeric metrics available"
+
+    model_prompt = (
+        f"You are a senior telecom optimization engineer. Region: {region}.\n"
+        f"Root-cause metrics: {ctx}.\n"
+        "Produce 2–5 distinct, practical recommendations to reduce call drops. "
+        "Each recommendation MUST be a single line, start with a number and a period (e.g. '1.'), "
+        "and include: Action, Priority (High/Medium/Low), and 1–2 short concrete steps or timeframes.\n"
+        "DO NOT repeat items, DO NOT output generic placeholders (e.g. 'Further optimization required').\n"
+        "Example line:\n"
+        "1. Optimize antenna tilt on sector 120 of T123 - Priority: High - Retilt by +3° and run drive test within 5 days.\n\n"
+        "Now list only the recommendations (no intro or footer)."
     )
 
+    # Ask the model (llm must already be created in your module)
     try:
-        response = llm(
-            prompt,
-            max_new_tokens=300,
-            do_sample=True,
-            temperature=0.55,
+        gen = llm(
+            model_prompt,
+            max_new_tokens=220,
+            do_sample=False,            # deterministic / less repetition
+            temperature=0.2,
             top_p=0.9,
-            repetition_penalty=1.25,
+            repetition_penalty=1.2,
+            num_beams=2,
         )[0]["generated_text"].strip()
     except Exception as e:
-        print(f"⚠️ Model error: {e}")
-        response = ""
+        print(f"⚠️ Model call failed: {e}")
+        gen = ""
 
-    # --- Extract clean recommendations ---
-    import re
-    recs = re.split(r"(?:\n\s*[-•]\s*|\n\d+\.\s*)", response)
-    recs = [r.strip() for r in recs if len(r.strip()) > 25 and not r.lower().startswith(("root", "observation"))]
+    # Robust parsing: extract numbered lines like "1. ...", "2. ..."
+    lines = re.findall(r'(?m)^\s*\d+\.\s*(.+)$', gen)
+    # If model returned nothing or content looks like placeholders or repeated text -> fallback
+    def looks_generic(text: str) -> bool:
+        low = text.lower()
+        if not text or len(text) < 20:
+            return True
+        # phrases that indicate non-actionable or placeholder output
+        if any(p in low for p in ["further network optimization", "action", "(action)", "reason for the suggestion"]):
+            return True
+        return False
 
-    # --- Intelligent fallback (natural phrasing, not hardcoded) ---
-    if len(recs) == 0:
-        print("⚙️ Using fallback AI phrasing.")
-        recs = []
-        if signal and float(signal) < -88:
-            recs.append("Improve antenna alignment and transmission power to enhance weak-signal regions.")
-        if "high" in congestion:
-            recs.append("Rebalance user load or deploy small cells in congested zones to maintain stable throughput.")
-        if handoff > 8:
-            recs.append("Optimize handoff timers and neighboring cell configurations to reduce failed transitions.")
-        if drop > 5:
-            recs.append("Analyze backhaul latency and interference patterns to identify deeper stability issues.")
-        if len(recs) == 0:
-            recs.append("Conduct a targeted drive test and apply parameter tuning based on performance insights.")
+    parsed = [ln.strip() for ln in lines if not looks_generic(ln)]
+    # If parsed is empty or duplicates or less than 2, use fallback_recs
+    if len(parsed) < 1 or len(set(parsed)) != len(parsed):
+        print("⚙️ Model output not actionable or missing -> using rule-based fallback.")
+        fallback = fallback_recs(region, metrics, meta)
+        # format fallback into bullet lines (they contain full sentences already)
+        return "\n".join(f"- {r}" for r in fallback)
 
-    # --- Final formatting ---
-    formatted = "\n".join(f"- {r}" for r in recs)
-    return formatted.strip()
+    # format parsed lines into nice bullets; ensure uniqueness
+    unique = []
+    for p in parsed:
+        if p not in unique:
+            unique.append(p)
+    # Prepend dash bullet for display
+    bullets = []
+    for u in unique[:5]:
+        # Keep "Action - Priority - Steps" if model included them; otherwise try to fragment
+        # Ensure each bullet is a full sentence.
+        bullet = u
+        # If the model returned multiple subclauses separated by semicolons or ' - ', keep them
+        bullets.append(f"- {bullet}")
+
+    return "\n".join(bullets)
 
 # --- Main Analysis ---
 def analyze_region_query(user_query: str, region: str = None):
