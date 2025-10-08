@@ -92,13 +92,9 @@ if run:
                 <li><b>Observation:</b> {observation}</li>
                 <li><b>Root Cause:</b> {root_cause}</li>
                 <li><b>Suggested Resolution:</b></li>
-                <ol>
-                    <li>{rec_lines[0]}</li>
-                    <li>{rec_lines[1]}</li>
-                    <li>{rec_lines[2]}</li>
-                    <li>{rec_lines[3]}</li>
-                    <li>{rec_lines[4]}</li>
-                </ol>
+                <ul>
+                    {''.join(f'<li>{line}</li>' for line in rec_lines)}
+                </ul>
             </ul>
         </div>
         """,
