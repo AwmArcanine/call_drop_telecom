@@ -96,6 +96,8 @@ if run:
                     <li>{rec_lines[0]}</li>
                     <li>{rec_lines[1]}</li>
                     <li>{rec_lines[2]}</li>
+                    <li>{rec_lines[3]}</li>
+                    <li>{rec_lines[4]}</li>
                 </ol>
             </ul>
         </div>
