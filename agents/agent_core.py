@@ -82,75 +82,81 @@ def generate_ai_summary(snippets: List[str], region: str = None) -> str:
 # --- AI Recommendations ---
 def generate_ai_recommendations(region: str, metrics: Dict) -> str:
     """
-    Hybrid + diverse reasoning: Ensures 3 unique, context-aware telecom recommendations.
-    Lightweight enough for LaMini-Flan-T5-248M.
+    Generates 3 diverse, context-aware recommendations using a hybrid of
+    AI phrasing + logical variation. Works efficiently with LaMini-Flan-T5-248M.
     """
     signal = metrics.get('avg_signal')
     congestion = str(metrics.get('congestion_level')).lower()
     handoff = float(metrics.get('handoff_pct') or 0)
     drop = float(metrics.get('drop_rate') or 0)
 
-    # --- Rule-based analysis ---
+    # --- Context reasoning ---
     issues = []
     if signal and float(signal) < -90:
         issues.append("weak signal strength")
     if "high" in congestion:
-        issues.append("high network congestion")
+        issues.append("network congestion")
     if handoff > 10:
         issues.append("frequent handoff failures")
     if not issues:
-        issues.append("moderate signal stability with minor network inefficiencies")
+        issues.append("moderate signal quality with minor issues")
 
     context = ", ".join(issues)
 
-    # --- Prompt for AI ---
+    # --- Intelligent prompt for diversity ---
     prompt = (
-        f"You are a telecom optimization engineer analyzing call drops in {region}.\n"
-        f"Detected network conditions: {context}. Current dropout rate: {drop}%.\n"
-        "Generate exactly 3 distinct and practical actions to reduce call drops.\n"
-        "Each recommendation should address a different aspect (signal, congestion, or handoff).\n"
-        "Keep it short, technical, and formatted as follows:\n\n"
-        "1. <Action> - Priority: <High/Medium/Low> - <Reason>\n"
-        "2. <Action> - Priority: <High/Medium/Low> - <Reason>\n"
-        "3. <Action> - Priority: <High/Medium/Low> - <Reason>\n\n"
-        "Avoid generic or repeated suggestions."
+        f"You are a telecom optimization expert analyzing call drops in {region}.\n"
+        f"Detected issues: {context}. Dropout rate: {drop}%.\n"
+        "Suggest three *different* network improvement actions. Each action must target a unique cause:\n"
+        "- One should focus on signal improvement.\n"
+        "- One should address congestion or load balancing.\n"
+        "- One should focus on handoff optimization or long-term network tuning.\n\n"
+        "Format exactly like this:\n"
+        "1. <Action> - Priority: <High/Medium/Low> - <Short Reason>\n"
+        "2. <Action> - Priority: <High/Medium/Low> - <Short Reason>\n"
+        "3. <Action> - Priority: <High/Medium/Low> - <Short Reason>\n"
+        "Ensure that all three actions are distinct and technically relevant."
     )
 
     response = llm(
         prompt,
         max_new_tokens=230,
-        do_sample=True,           # adds controlled diversity
-        temperature=0.45,          # mild creativity
+        do_sample=True,
+        temperature=0.55,         # balanced variety
         top_p=0.9,
-        repetition_penalty=1.25,   # discourages repetitive phrasing
+        repetition_penalty=1.3,   # prevents rephrasing the same suggestion
     )[0]["generated_text"].strip()
 
     import re
     recs = re.findall(r"\d\.\s?.*?(?=\d\.|$)", response, re.DOTALL)
     recs = [r.strip() for r in recs if len(r.strip()) > 10]
 
-    # --- Fallback logic for incomplete or repetitive output ---
-    if not recs or len(set(recs)) < 3:
-        print("⚙️ Using logic-guided fallback due to repetitive model output.")
+    # --- Fallback for repetitive or invalid AI output ---
+    if len(set(recs)) < 3 or not recs:
+        print("⚙️ Fallback triggered for diversity.")
         recs = []
         i = 1
 
-        if signal and float(signal) < -90:
-            recs.append(f"{i}. Optimize antenna tilt and boost transmission power - Priority: High - To improve weak signal below -90 dBm.")
+        if signal and float(signal) < -85:
+            recs.append(f"{i}. Optimize antenna tilt and transmission power - Priority: High - To strengthen weak signal around {signal} dBm.")
             i += 1
-        if "high" in congestion:
-            recs.append(f"{i}. Deploy microcells or load balancing - Priority: High - To handle peak-hour congestion.")
+        if "high" in congestion or drop > 5:
+            recs.append(f"{i}. Deploy additional microcells or optimize load balancing - Priority: High - To reduce congestion during high traffic hours.")
             i += 1
-        if handoff > 10:
-            recs.append(f"{i}. Recalibrate handoff thresholds and timers - Priority: Medium - To lower {handoff}% failure rate.")
+        if handoff > 5:
+            recs.append(f"{i}. Tune handoff thresholds and neighbor list parameters - Priority: Medium - To reduce {handoff}% handoff failures.")
             i += 1
-        if drop > 5 and i <= 3:
-            recs.append(f"{i}. Conduct targeted drive tests and network audits - Priority: Medium - To identify drop-prone zones.")
-            i += 1
-        if len(recs) < 3:
-            recs.append(f"{i}. Upgrade backhaul capacity and optimize routing - Priority: Medium - To maintain stable throughput.")
 
-    return "\n".join(recs[:3])
+        if len(recs) < 3:
+            recs.append(f"{i}. Schedule routine network audits and backhaul optimization - Priority: Medium - To sustain long-term call quality.")
+
+    # --- Ensure exactly 3 unique recommendations ---
+    recs = list(dict.fromkeys(recs))[:3]
+    while len(recs) < 3:
+        recs.append(f"{len(recs)+1}. Conduct network health checks - Priority: Medium - To maintain service reliability.")
+
+    return "\n".join(recs)
+
 
 
 
