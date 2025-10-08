@@ -133,93 +133,55 @@ def fallback_recs(region: str, metrics: Dict, meta: Dict = None) -> List[str]:
 
 
 # --- AI Recommendations ---
-def generate_ai_recommendations(region: str, metrics: Dict, meta: Dict = None) -> str:
+def generate_ai_recommendations(region: str, metrics: Dict, root_cause: str = None) -> str:
     """
-    Adaptive recommendation generator:
-    - Asks the model for concise, engineer-friendly actions
-    - Parses numbered output robustly
-    - If the model output is missing / generic / repetitive, falls back to `fallback_recs`
-    - Returns a newline-separated bullet-list string (ready for display)
+    Fully AI-based generation of optimization recommendations.
+    The model analyzes metrics and root cause text to produce unique, data-driven, technical resolutions.
     """
-    # Build a concise context describing core problems
-    sig = metrics.get("avg_signal")
-    congestion = metrics.get("congestion_level")
-    handoff = metrics.get("handoff_pct")
-    drop_rate = metrics.get("drop_rate")
 
-    root_summary = []
-    if sig is not None:
-        root_summary.append(f"avg_signal={sig} dBm")
-    if congestion:
-        root_summary.append(f"congestion={congestion}")
-    if handoff is not None:
-        root_summary.append(f"handoff_pct={handoff}%")
-    if drop_rate is not None:
-        root_summary.append(f"drop_rate={drop_rate}%")
-    ctx = ", ".join(root_summary) if root_summary else "no numeric metrics available"
-
-    model_prompt = (
-        f"You are a senior telecom optimization engineer. Region: {region}.\n"
-        f"Root-cause metrics: {ctx}.\n"
-        "Produce 2–5 distinct, practical recommendations to reduce call drops. "
-        "Each recommendation MUST be a single line, start with a number and a period (e.g. '1.'), "
-        "and include: Action, Priority (High/Medium/Low), and 1–2 short concrete steps or timeframes.\n"
-        "DO NOT repeat items, DO NOT output generic placeholders (e.g. 'Further optimization required').\n"
-        "Example line:\n"
-        "1. Optimize antenna tilt on sector 120 of T123 - Priority: High - Retilt by +3° and run drive test within 5 days.\n\n"
-        "Now list only the recommendations (no intro or footer)."
+    # Construct a detailed, reasoning-based prompt
+    prompt = (
+        f"You are a senior telecom optimization engineer analyzing network performance for {region}.\n"
+        f"Root Cause Summary: {root_cause or 'Not explicitly provided.'}\n"
+        f"Metrics:\n"
+        f"- Average Signal Strength: {metrics.get('avg_signal')} dBm\n"
+        f"- Congestion Level: {metrics.get('congestion_level')}\n"
+        f"- Handoff Failure Rate: {metrics.get('handoff_pct')}%\n"
+        f"- Dropout Rate: {metrics.get('drop_rate')}%\n\n"
+        "Your task is to propose **data-driven, technically sound, and region-specific actions** "
+        "that directly address the detected root causes and improve network stability.\n\n"
+        "Write 2 to 5 unique recommendations. Each should be specific and practical — "
+        "for example, tuning parameters, deploying microcells, optimizing handoff thresholds, or adjusting network configurations. "
+        "Each action must explicitly connect to the problem described in the Root Cause section.\n\n"
+        "Use this format only (no numbering placeholders, no generic terms):\n"
+        "- <Technical action and rationale>\n\n"
+        "Avoid repeating the same concept. Do not use placeholders or generic text like 'further optimization required'. "
+        "Respond only with the recommendations, nothing else."
     )
 
-    # Ask the model (llm must already be created in your module)
     try:
-        gen = llm(
-            model_prompt,
-            max_new_tokens=220,
-            do_sample=False,            # deterministic / less repetition
-            temperature=0.2,
+        response = llm(
+            prompt,
+            max_new_tokens=350,
+            temperature=0.45,      # encourages diversity
             top_p=0.9,
-            repetition_penalty=1.2,
-            num_beams=2,
+            repetition_penalty=1.3, # prevents similar items
+            do_sample=True,
         )[0]["generated_text"].strip()
+
     except Exception as e:
-        print(f"⚠️ Model call failed: {e}")
-        gen = ""
+        print(f"⚠️ Model generation error: {e}")
+        response = "No recommendations could be generated at this time."
 
-    # Robust parsing: extract numbered lines like "1. ...", "2. ..."
-    lines = re.findall(r'(?m)^\s*\d+\.\s*(.+)$', gen)
-    # If model returned nothing or content looks like placeholders or repeated text -> fallback
-    def looks_generic(text: str) -> bool:
-        low = text.lower()
-        if not text or len(text) < 20:
-            return True
-        # phrases that indicate non-actionable or placeholder output
-        if any(p in low for p in ["further network optimization", "action", "(action)", "reason for the suggestion"]):
-            return True
-        return False
+    # --- Clean output ---
+    import re
+    recs = re.findall(r"(?:^|\n)[\-•]\s*(.+)", response)
+    recs = [r.strip() for r in recs if len(r.strip()) > 10]
+    recs = list(dict.fromkeys(recs))  # remove duplicates
 
-    parsed = [ln.strip() for ln in lines if not looks_generic(ln)]
-    # If parsed is empty or duplicates or less than 2, use fallback_recs
-    if len(parsed) < 1 or len(set(parsed)) != len(parsed):
-        print("⚙️ Model output not actionable or missing -> using rule-based fallback.")
-        fallback = fallback_recs(region, metrics, meta)
-        # format fallback into bullet lines (they contain full sentences already)
-        return "\n".join(f"- {r}" for r in fallback)
+    # --- Final output ---
+    return "\n".join(f"- {r}" for r in recs[:5]) if recs else response
 
-    # format parsed lines into nice bullets; ensure uniqueness
-    unique = []
-    for p in parsed:
-        if p not in unique:
-            unique.append(p)
-    # Prepend dash bullet for display
-    bullets = []
-    for u in unique[:5]:
-        # Keep "Action - Priority - Steps" if model included them; otherwise try to fragment
-        # Ensure each bullet is a full sentence.
-        bullet = u
-        # If the model returned multiple subclauses separated by semicolons or ' - ', keep them
-        bullets.append(f"- {bullet}")
-
-    return "\n".join(bullets)
 
 # --- Main Analysis ---
 def analyze_region_query(user_query: str, region: str = None):
