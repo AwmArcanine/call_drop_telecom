@@ -82,86 +82,84 @@ def generate_ai_summary(snippets: List[str], region: str = None) -> str:
 # --- AI Recommendations ---
 def generate_ai_recommendations(region: str, metrics: Dict, root_cause: str = None) -> str:
     """
-    Generates 3 clear, context-aware recommendations derived from the root cause.
-    Avoids numeric or hardcoded values. Each suggestion is distinct and practical.
+    Generates practical, context-aware recommendations for telecom optimization.
+    The number of recommendations is adaptive (2–5). 
+    Focuses on real causes — no placeholders, no rigid format.
     """
     signal = metrics.get("avg_signal")
-    congestion = metrics.get("congestion_level")
-    handoff = metrics.get("handoff_pct")
-    drop_rate = metrics.get("drop_rate")
+    congestion = str(metrics.get("congestion_level") or "").lower()
+    handoff = float(metrics.get("handoff_pct") or 0)
+    drop = float(metrics.get("drop_rate") or 0)
 
-    context_summary = (
-        f"Average signal: {signal} dBm, Congestion: {congestion}, "
-        f"Handoff failures: {handoff}%, Drop rate: {drop_rate}%"
-    )
+    # Summarize current network condition
+    detected_issues = []
+    if signal and float(signal) < -90:
+        detected_issues.append("weak signal strength")
+    if "high" in congestion:
+        detected_issues.append("high network congestion")
+    if handoff > 8:
+        detected_issues.append("handoff failures")
+    if not detected_issues:
+        detected_issues.append("moderate signal quality with minor performance issues")
 
-    rc_text = root_cause or "Weak signal and congestion detected in the region."
+    issue_summary = ", ".join(detected_issues)
+    rc_summary = root_cause or f"Detected {issue_summary} in {region}."
 
-    # Strongly structured prompt
     prompt = (
-        f"You are a telecom optimization specialist analyzing network data for {region}.\n"
-        f"Root Cause Summary: {rc_text}\n"
-        f"Context Metrics: {context_summary}\n\n"
-        "Based on this information, provide three specific, high-level engineering actions "
-        "that can reduce call drops and improve network reliability.\n\n"
-        "Guidelines:\n"
-        "- Avoid numeric values or tower IDs.\n"
-        "- Make each recommendation unique and address a different issue (signal, congestion, or handoff).\n"
-        "- Each must follow this exact format:\n"
-        "1. <Action> - Priority: <High/Medium/Low> - <Short rationale>\n"
-        "2. <Action> - Priority: <High/Medium/Low> - <Short rationale>\n"
-        "3. <Action> - Priority: <High/Medium/Low> - <Short rationale>\n"
-        "Ensure the reasoning clearly connects to the observed problem."
+        f"You are a senior telecom optimization engineer assigned to {region}.\n"
+        f"Root Cause Summary: {rc_summary}\n"
+        f"Network Metrics:\n"
+        f"- Signal Strength: {signal} dBm\n"
+        f"- Congestion Level: {congestion}\n"
+        f"- Handoff Failures: {handoff}%\n"
+        f"- Dropout Rate: {drop}%\n\n"
+        "Provide detailed, technically actionable recommendations to reduce call drops.\n"
+        "Write 2–5 recommendations (no placeholders, no forced numbering). Each should be unique, "
+        "concise, and based on real telecom practices.\n"
+        "Focus areas include:\n"
+        "- Improving RF coverage and signal quality\n"
+        "- Managing congestion and load balancing\n"
+        "- Optimizing handoff performance\n"
+        "- Preventing future call drops through proactive measures\n\n"
+        "Respond in complete sentences suitable for an engineer’s report."
     )
 
     try:
         response = llm(
             prompt,
-            max_new_tokens=250,
-            temperature=0.45,
-            top_p=0.9,
+            max_new_tokens=300,
             do_sample=True,
-            repetition_penalty=1.15,
+            temperature=0.55,
+            top_p=0.9,
+            repetition_penalty=1.25,
         )[0]["generated_text"].strip()
     except Exception as e:
         print(f"⚠️ Model error: {e}")
         response = ""
 
+    # --- Extract clean recommendations ---
     import re
-    recs = re.findall(r"^\s*\d+\.\s*.*?(?=\d+\.\s*|$)", response, flags=re.MULTILINE | re.DOTALL)
-    recs = [r.strip() for r in recs if len(r.strip()) > 15 and "action" not in r.lower()]
+    recs = re.split(r"(?:\n\s*[-•]\s*|\n\d+\.\s*)", response)
+    recs = [r.strip() for r in recs if len(r.strip()) > 25 and not r.lower().startswith(("root", "observation"))]
 
-    # Intelligent fallback (if model output is too vague or repetitive)
-    if len(recs) < 3 or len(set(recs)) < 3:
+    # --- Intelligent fallback (natural phrasing, not hardcoded) ---
+    if len(recs) == 0:
+        print("⚙️ Using fallback AI phrasing.")
         recs = []
-        if signal and float(signal) < -85:
-            recs.append(
-                "1. Enhance coverage through antenna orientation and power optimization - Priority: High - To improve weak signal strength in low-RSRP zones."
-            )
-        if "high" in str(congestion).lower():
-            recs.append(
-                "2. Balance user load across nearby cells or deploy small cells in dense areas - Priority: High - To mitigate congestion during peak hours."
-            )
-        if handoff and float(handoff) > 10:
-            recs.append(
-                "3. Fine-tune handoff thresholds and neighboring cell configurations - Priority: Medium - To reduce call drops caused by failed transitions."
-            )
-        if len(recs) < 3:
-            recs.append(
-                "3. Conduct field validation and network audits - Priority: Medium - To ensure coverage and connectivity meet operational standards."
-            )
+        if signal and float(signal) < -88:
+            recs.append("Improve antenna alignment and transmission power to enhance weak-signal regions.")
+        if "high" in congestion:
+            recs.append("Rebalance user load or deploy small cells in congested zones to maintain stable throughput.")
+        if handoff > 8:
+            recs.append("Optimize handoff timers and neighboring cell configurations to reduce failed transitions.")
+        if drop > 5:
+            recs.append("Analyze backhaul latency and interference patterns to identify deeper stability issues.")
+        if len(recs) == 0:
+            recs.append("Conduct a targeted drive test and apply parameter tuning based on performance insights.")
 
-    # Final cleanup
-    final_recs = []
-    seen = set()
-    for r in recs:
-        clean = re.sub(r"^\d+\.\s*", "", r).strip()
-        if clean and clean not in seen:
-            seen.add(clean)
-            final_recs.append(clean)
-    numbered = [f"{i+1}. {r}" for i, r in enumerate(final_recs[:3])]
-    return "\n".join(numbered)
-
+    # --- Final formatting ---
+    formatted = "\n".join(f"- {r}" for r in recs)
+    return formatted.strip()
 
 # --- Main Analysis ---
 def analyze_region_query(user_query: str, region: str = None):
