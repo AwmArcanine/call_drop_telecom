@@ -82,69 +82,82 @@ def generate_ai_summary(snippets: List[str], region: str = None) -> str:
 # --- AI Recommendations ---
 def generate_ai_recommendations(region: str, metrics: Dict) -> str:
     """
-    Produces 3–5 distinct, technical, and data-driven recommendations.
-    It analyzes the metrics and forms specific network optimization actions.
-    Works efficiently with LaMini-Flan-T5-248M.
+    Generates precise, region-aware technical recommendations for telecom engineers.
+    The output uses realistic optimization actions (antenna tilt, small cells, TTT tuning, etc.)
+    based on the root cause and metrics observed.
     """
     signal = metrics.get("avg_signal")
     congestion = str(metrics.get("congestion_level")).lower()
     handoff = float(metrics.get("handoff_pct") or 0)
     drop = float(metrics.get("drop_rate") or 0)
 
-    # Build a factual input for the model
+    issues = []
+    if signal and float(signal) < -90:
+        issues.append("weak signal strength")
+    if "high" in congestion:
+        issues.append("high congestion")
+    if handoff > 10:
+        issues.append("frequent handoff failures")
+    if not issues:
+        issues.append("minor network performance variations")
+
+    issue_summary = ", ".join(issues)
+
+    # More structured, technically grounded prompt
     prompt = (
-        f"You are a senior telecom optimization expert analyzing call drop causes in {region}.\n"
-        "Here are the detected performance metrics:\n"
+        f"You are a telecom network optimization engineer analyzing call drop logs for region {region}.\n"
+        f"Detected conditions:\n"
         f"- Average Signal Strength: {signal} dBm\n"
         f"- Congestion Level: {congestion}\n"
         f"- Handoff Failure Rate: {handoff}%\n"
         f"- Dropout Rate: {drop}%\n\n"
-        "Based on this data, infer the **main causes** and provide 3–5 specific technical recommendations.\n"
-        "Each action must be unique and clearly tied to one of the detected issues.\n"
-        "Use precise telecom terminology (e.g., RSRP, handoff timers, scheduler optimization, small cell deployment).\n\n"
-        "Format strictly as:\n"
-        "1. <Action> - Priority: <High/Medium/Low> - <Reason>\n"
-        "2. <Action> - Priority: <High/Medium/Low> - <Reason>\n"
-        "3. <Action> - Priority: <High/Medium/Low> - <Reason>\n"
-        "4. ... (optional if relevant)\n"
-        "Keep explanations concise and professional."
+        f"Root cause summary: {issue_summary}.\n\n"
+        f"Generate exactly 3–5 region-specific recommendations with measurable actions engineers can implement.\n"
+        f"Each recommendation must mention specific network parameters, equipment, or configuration changes.\n"
+        f"Use the following format:\n"
+        f"1. <Action> - Priority: <High/Medium/Low> - <Technical justification>\n\n"
+        f"Example recommendations:\n"
+        f"1. Increase antenna tilt by +2° for tower T951 in {region} to improve coverage in weak-signal zones. - Priority: High - Signal observed at -95 dBm.\n"
+        f"2. Deploy an additional microcell in {region} near the congested cluster to reduce PRB load by 20%. - Priority: High - Congestion detected during evening hours.\n"
+        f"3. Adjust handoff Time-To-Trigger (TTT) from 80 ms to 120 ms for smoother cell transitions. - Priority: Medium - 13% handoff failures between adjacent cells.\n\n"
+        f"Now generate new, unique, technically valid recommendations for this region only:"
     )
 
     response = llm(
         prompt,
-        max_new_tokens=280,
+        max_new_tokens=300,
         do_sample=True,
-        temperature=0.45,
+        temperature=0.5,
         top_p=0.9,
-        repetition_penalty=1.3,
+        repetition_penalty=1.2,
     )[0]["generated_text"].strip()
 
     import re
     recs = re.findall(r"\d\.\s?.*?(?=\d\.|$)", response, re.DOTALL)
     recs = [r.strip() for r in recs if len(r.strip()) > 10]
 
-    # --- Smart Fallback (AI-guided rule logic) ---
-    if not recs or len(set(recs)) < 3:
-        print("⚙️ Fallback: Enhanced contextual generation triggered.")
+    # If AI output is invalid or generic, create a logic-based fallback
+    if len(recs) < 3:
+        print("⚙️ Fallback: Using logic-based engineering recommendations.")
         recs = []
         i = 1
-
         if signal and float(signal) < -85:
-            recs.append(f"{i}. Optimize antenna azimuth and increase RSRP power - Priority: High - Weak signal around {signal} dBm causing coverage loss.")
+            recs.append(f"{i}. Retilt antennas for low-coverage sectors in {region} by +3° and verify RSRP improvement. - Priority: High - Weak signal around {signal} dBm.")
             i += 1
         if "high" in congestion:
-            recs.append(f"{i}. Add or reallocate small cells and optimize scheduler resources - Priority: High - High congestion detected in {region}.")
+            recs.append(f"{i}. Add one microcell near dense zones in {region} or enable load balancing on nearby towers. - Priority: High - Heavy congestion detected.")
             i += 1
         if handoff > 10:
-            recs.append(f"{i}. Calibrate handoff thresholds and TTT (Time-To-Trigger) parameters - Priority: Medium - {handoff}% handoff failure rate impacting call continuity.")
+            recs.append(f"{i}. Increase handoff margin and TTT by 30–50 ms to reduce drop rate caused by premature transitions. - Priority: Medium - {handoff}% handoff failure rate.")
             i += 1
         if drop > 5:
-            recs.append(f"{i}. Upgrade backhaul or enable dynamic power control - Priority: Medium - {drop}% call dropout rate under load.")
+            recs.append(f"{i}. Upgrade backhaul link and monitor throughput on high-traffic nodes. - Priority: Medium - Drop rate {drop}%.")
             i += 1
         if len(recs) < 3:
-            recs.append(f"{i}. Schedule drive tests and KPI audits - Priority: Medium - To validate parameter tuning and QoS compliance.")
-
+            recs.append(f"{i}. Conduct a field drive test in {region} to verify coverage and signal overlap. - Priority: Medium - To validate configuration changes.")
+    
     return "\n".join(recs[:5])
+
 
 
 
