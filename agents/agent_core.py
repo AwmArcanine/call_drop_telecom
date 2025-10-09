@@ -133,52 +133,78 @@ def fallback_recs(region: str, metrics: Dict, meta: Dict = None) -> List[str]:
 
 
 # --- AI Recommendations ---
-def generate_ai_recommendations(region: str, metrics: Dict, root_cause: str = None) -> str:
+def generate_ai_recommendations(region: str, metrics: Dict) -> str:
     """
-    Generates concise, technical, and region-specific optimization recommendations 
-    for telecom network performance, avoiding disclaimers or generic responses.
+    Generates realistic, region-specific telecom optimization actions based on root causes.
+    - Analyses signal, congestion, and handoff issues dynamically.
+    - Produces diverse, non-repetitive, actionable recommendations.
     """
+    signal = metrics.get('avg_signal')
+    congestion = str(metrics.get('congestion_level')).lower()
+    handoff = float(metrics.get('handoff_pct') or 0)
+    drop = float(metrics.get('drop_rate') or 0)
 
+    # --- Step 1: derive root issues ---
+    issues = []
+    if signal and float(signal) < -90:
+        issues.append("weak signal coverage")
+    if "high" in congestion:
+        issues.append("network congestion")
+    if handoff > 10:
+        issues.append("high handoff failure rate")
+    if not issues:
+        issues.append("minor optimization required")
+
+    context = ", ".join(issues)
+
+    # --- Step 2: construct intelligent prompt ---
     prompt = (
-        f"You are an experienced telecom optimization engineer working on network performance in {region}.\n"
-        f"Root Cause Summary: {root_cause or 'Not explicitly provided.'}\n"
-        f"Observed Metrics:\n"
-        f"- Average Signal Strength: {metrics.get('avg_signal')} dBm\n"
-        f"- Congestion Level: {metrics.get('congestion_level')}\n"
-        f"- Handoff Failure Rate: {metrics.get('handoff_pct')}%\n"
-        f"- Dropout Rate: {metrics.get('drop_rate')}%\n\n"
-        "Based on this data, list **specific technical optimization actions** to address the detected issues.\n"
-        "Each recommendation should directly relate to the metrics and root cause provided.\n\n"
-        "Guidelines:\n"
-        "- Do NOT include any disclaimers or explanations.\n"
-        "- Write only the recommendations, no introductions or summaries.\n"
-        "- Be region-aware (adapt recommendations for the given city/environment).\n"
-        "- Use actionable, engineering-level language.\n"
-        "- Each point must be unique, practical, and technically justified.\n\n"
-        "Format:\n"
-        "- <Recommendation and short rationale>\n"
+        f"You are a telecom optimization engineer analyzing network issues in {region}.\n"
+        f"Detected issues: {context} (signal={signal} dBm, congestion={congestion}, handoff failure={handoff}%).\n"
+        f"Dropout rate observed: {drop}%.\n\n"
+        "Provide 2–4 **practical and specific** technical actions engineers can take to resolve these problems.\n"
+        "Each recommendation must:\n"
+        "- Be unique and directly related to one or more detected issues.\n"
+        "- Include a Priority (High/Medium/Low).\n"
+        "- Be concise (max 2 lines).\n\n"
+        "Format strictly as:\n"
+        "1. <Action> - Priority: <High/Medium/Low> - <Short reason>\n"
+        "2. ...\n"
+        "3. ...\n"
+        "Generate only the numbered recommendations, no explanations."
     )
 
-    try:
-        response = llm(
-            prompt,
-            max_new_tokens=300,
-            temperature=0.45,
-            top_p=0.9,
-            repetition_penalty=1.25,
-            do_sample=True,
-        )[0]["generated_text"].strip()
+    # --- Step 3: generate ---
+    response = llm(
+        prompt,
+        max_new_tokens=300,
+        temperature=0.55,
+        top_p=0.9,
+        repetition_penalty=1.25,
+        do_sample=True,
+    )[0]["generated_text"].strip()
 
-    except Exception as e:
-        print(f"⚠️ Model generation error: {e}")
-        response = "No recommendations could be generated at this time."
-
+    # --- Step 4: clean formatting ---
     import re
-    recs = re.findall(r"(?:^|\n)[\-•]\s*(.+)", response)
-    recs = [r.strip() for r in recs if len(r.strip()) > 8]
-    recs = list(dict.fromkeys(recs))
+    recs = re.findall(r"\d\..*?(?=\d\.|$)", response, re.DOTALL)
+    recs = [r.strip() for r in recs if len(r.strip()) > 10]
+    seen = set()
+    recs = [r for r in recs if not (r in seen or seen.add(r))]
 
-    return "\n".join(f"- {r}" for r in recs[:5]) if recs else response
+    # --- Step 5: AI fallback (minimal) ---
+    if not recs:
+        print("⚙️ AI fallback triggered — generating smart defaults.")
+        recs = []
+        if signal and float(signal) < -90:
+            recs.append("1. Optimize antenna tilt and transmission gain - Priority: High - To improve weak signal zones.")
+        if "high" in congestion:
+            recs.append("2. Deploy microcells or redistribute load - Priority: High - To ease traffic congestion.")
+        if handoff > 10:
+            recs.append("3. Adjust handoff thresholds - Priority: Medium - To minimize frequent handoffs.")
+        if not recs:
+            recs.append("1. Conduct routine network optimization drive tests - Priority: Medium - To maintain stable connectivity.")
+
+    return "\n".join(recs[:4])
 
 
 # --- Main Analysis ---
