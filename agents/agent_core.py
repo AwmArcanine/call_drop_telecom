@@ -135,37 +135,37 @@ def fallback_recs(region: str, metrics: Dict, meta: Dict = None) -> List[str]:
 # --- AI Recommendations ---
 def generate_ai_recommendations(region: str, metrics: Dict, root_cause: str = None) -> str:
     """
-    Fully AI-based generation of optimization recommendations.
-    The model analyzes metrics and root cause text to produce unique, data-driven, technical resolutions.
+    Generates concise, technical, and region-specific optimization recommendations 
+    for telecom network performance, avoiding disclaimers or generic responses.
     """
 
-    # Construct a detailed, reasoning-based prompt
     prompt = (
-        f"You are a senior telecom optimization engineer analyzing network performance for {region}.\n"
+        f"You are an experienced telecom optimization engineer working on network performance in {region}.\n"
         f"Root Cause Summary: {root_cause or 'Not explicitly provided.'}\n"
-        f"Metrics:\n"
+        f"Observed Metrics:\n"
         f"- Average Signal Strength: {metrics.get('avg_signal')} dBm\n"
         f"- Congestion Level: {metrics.get('congestion_level')}\n"
         f"- Handoff Failure Rate: {metrics.get('handoff_pct')}%\n"
         f"- Dropout Rate: {metrics.get('drop_rate')}%\n\n"
-        "Your task is to propose **data-driven, technically sound, and region-specific actions** "
-        "that directly address the detected root causes and improve network stability.\n\n"
-        "Write 2 to 5 unique recommendations. Each should be specific and practical — "
-        "for example, tuning parameters, deploying microcells, optimizing handoff thresholds, or adjusting network configurations. "
-        "Each action must explicitly connect to the problem described in the Root Cause section.\n\n"
-        "Use this format only (no numbering placeholders, no generic terms):\n"
-        "- <Technical action and rationale>\n\n"
-        "Avoid repeating the same concept. Do not use placeholders or generic text like 'further optimization required'. "
-        "Respond only with the recommendations, nothing else."
+        "Based on this data, list **specific technical optimization actions** to address the detected issues.\n"
+        "Each recommendation should directly relate to the metrics and root cause provided.\n\n"
+        "Guidelines:\n"
+        "- Do NOT include any disclaimers or explanations.\n"
+        "- Write only the recommendations, no introductions or summaries.\n"
+        "- Be region-aware (adapt recommendations for the given city/environment).\n"
+        "- Use actionable, engineering-level language.\n"
+        "- Each point must be unique, practical, and technically justified.\n\n"
+        "Format:\n"
+        "- <Recommendation and short rationale>\n"
     )
 
     try:
         response = llm(
             prompt,
-            max_new_tokens=350,
-            temperature=0.45,      # encourages diversity
+            max_new_tokens=300,
+            temperature=0.45,
             top_p=0.9,
-            repetition_penalty=1.3, # prevents similar items
+            repetition_penalty=1.25,
             do_sample=True,
         )[0]["generated_text"].strip()
 
@@ -173,13 +173,11 @@ def generate_ai_recommendations(region: str, metrics: Dict, root_cause: str = No
         print(f"⚠️ Model generation error: {e}")
         response = "No recommendations could be generated at this time."
 
-    # --- Clean output ---
     import re
     recs = re.findall(r"(?:^|\n)[\-•]\s*(.+)", response)
-    recs = [r.strip() for r in recs if len(r.strip()) > 10]
-    recs = list(dict.fromkeys(recs))  # remove duplicates
+    recs = [r.strip() for r in recs if len(r.strip()) > 8]
+    recs = list(dict.fromkeys(recs))
 
-    # --- Final output ---
     return "\n".join(f"- {r}" for r in recs[:5]) if recs else response
 
 
