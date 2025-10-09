@@ -72,15 +72,27 @@ if run:
         f"Weak signal ({signal} dBm) + {congestion.capitalize()} congestion + {handoff}% handoff failure."
     )
 
-    # Get recommendations and ensure 3 points
-    rec_text = result.get("recommendations", "").strip()
-    rec_lines = re.findall(r"\d+\..+", rec_text)
-    if not rec_lines:
-        rec_lines = re.split(r"[.;]\s+", rec_text)
-    rec_lines = [r.strip(" -•\n") for r in rec_lines if len(r.strip()) > 5]
-    while len(rec_lines) < 3:
-        rec_lines.append("Further network optimization required.")
-    rec_lines = rec_lines[:3]
+# --- Clean and format AI-generated recommendations ---
+import re
+
+rec_text = result.get("recommendations", "").strip()
+
+# Split cleanly by newlines, numbered points, or bullets
+rec_lines = re.split(r"(?:\n|(?<=\d\.)\s+|- )", rec_text)
+rec_lines = [r.strip(" -•\n") for r in rec_lines if len(r.strip()) > 5]
+
+# Remove duplicates and empty items
+seen = set()
+rec_lines = [r for r in rec_lines if not (r in seen or seen.add(r))]
+
+# Display neatly formatted recommendations
+st.markdown("### Suggested Resolution:")
+if not rec_lines:
+    st.info("No recommendations generated. Please re-run analysis.")
+else:
+    for i, rec in enumerate(rec_lines, start=1):
+        st.markdown(f"**{i}.** {rec}")
+
 
     # ---- Display Agent Response ----
     st.markdown("### 🧠 Agent Response")
@@ -92,10 +104,10 @@ if run:
                 <li><b>Observation:</b> {observation}</li>
                 <li><b>Root Cause:</b> {root_cause}</li>
                 <li><b>Suggested Resolution:</b></li>
-                <ul>
-                    {''.join(f'<li>{line}</li>' for line in rec_lines)}
-                </ul>
             </ul>
+            <ol style="padding-left:20px; margin-top:5px; color:#333;">
+                {''.join(f'<li style="margin-bottom:6px;">{line}</li>' for line in rec_lines)}
+            </ol>
         </div>
         """,
         unsafe_allow_html=True,
