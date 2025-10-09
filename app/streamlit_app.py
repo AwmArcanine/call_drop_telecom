@@ -73,25 +73,25 @@ if run:
     )
 
 # --- Clean and format AI-generated recommendations ---
-import re
+    import re
 
-rec_text = result.get("recommendations", "").strip()
+    rec_text = result.get("recommendations", "").strip()
 
-# Split cleanly by newlines, numbered points, or bullets
-rec_lines = re.split(r"(?:\n|(?<=\d\.)\s+|- )", rec_text)
-rec_lines = [r.strip(" -•\n") for r in rec_lines if len(r.strip()) > 5]
+    # Split cleanly by newlines, numbered points, or bullets
+    rec_lines = re.split(r"(?:\n|(?<=\d\.)\s+|- )", rec_text)
+    rec_lines = [r.strip(" -•\n") for r in rec_lines if len(r.strip()) > 5]
 
-# Remove duplicates and empty items
-seen = set()
-rec_lines = [r for r in rec_lines if not (r in seen or seen.add(r))]
+    # Remove duplicates and empty items
+    seen = set()
+    rec_lines = [r for r in rec_lines if not (r in seen or seen.add(r))]
 
-# Display neatly formatted recommendations
-st.markdown("### Suggested Resolution:")
-if not rec_lines:
-    st.info("No recommendations generated. Please re-run analysis.")
-else:
-    for i, rec in enumerate(rec_lines, start=1):
-        st.markdown(f"**{i}.** {rec}")
+    # Display neatly formatted recommendations
+    st.markdown("### Suggested Resolution:")
+    if not rec_lines:
+        st.info("No recommendations generated. Please re-run analysis.")
+    else:
+        for i, rec in enumerate(rec_lines, start=1):
+            st.markdown(f"**{i}.** {rec}")
 
 
     # ---- Display Agent Response ----
