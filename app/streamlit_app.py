@@ -85,14 +85,6 @@ if run:
     seen = set()
     rec_lines = [r for r in rec_lines if not (r in seen or seen.add(r))]
 
-    # Display neatly formatted recommendations
-    st.markdown("### Suggested Resolution:")
-    if not rec_lines:
-        st.info("No recommendations generated. Please re-run analysis.")
-    else:
-        for i, rec in enumerate(rec_lines, start=1):
-            st.markdown(f"**{i}.** {rec}")
-
 
     # ---- Display Agent Response ----
     st.markdown("### 🧠 Agent Response")
